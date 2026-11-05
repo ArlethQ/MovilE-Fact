@@ -674,6 +674,9 @@ export const styles = StyleSheet.create({
   canvasCentered: {
     justifyContent: 'center',
   },
+  canvasLimitedHeight: {
+    paddingVertical: 12,
+  },
   authScrollContent: {
     paddingBottom: 72,
   },
@@ -711,6 +714,14 @@ export const styles = StyleSheet.create({
   },
   cardWide: {
     marginVertical: 8,
+  },
+  cardCompact: {
+    borderRadius: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 18,
+  },
+  cardTablet: {
+    maxWidth: 620,
   },
   logoBadge: {
     alignItems: 'center',
@@ -1341,6 +1352,9 @@ export const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 8,
   },
+  responsiveStack: {
+    flexDirection: 'column',
+  },
   segmentButton: {
     alignItems: 'center',
     backgroundColor: '#F6F9FC',
@@ -1666,6 +1680,10 @@ export const styles = StyleSheet.create({
     shadowRadius: 18,
     elevation: 4,
   },
+  workspaceBodyFrameCompact: {
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+  },
   workspaceBodyScroll: {
     flex: 1,
     width: '100%',
@@ -1678,6 +1696,9 @@ export const styles = StyleSheet.create({
     paddingTop: 14,
     paddingBottom: 96,
     width: '100%',
+  },
+  workspaceCanvasTablet: {
+    maxWidth: 1100,
   },
   efactHomeWorkspaceCanvas: {
     paddingHorizontal: 0,

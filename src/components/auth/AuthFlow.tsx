@@ -25,6 +25,7 @@ import { Field, InlineSwitch, LoginActionTiles, MessageBox, PrimaryButton, Secon
 import { InitialsAvatar } from '../ui/MenuItem';
 import { styles } from '../../styles/appStyles';
 import { PrivacyPolicyScreen } from '../legal/PrivacyPolicyScreen';
+import { useResponsiveLayout } from '../../hooks/useResponsiveLayout';
 
 type AuthMode = 'login' | 'register' | 'forgot' | 'change';
 type MessageState = { type: 'success' | 'error' | 'info'; text: string } | null;
@@ -734,6 +735,7 @@ export function getCajaSerieForDocument(preparacion: FacturaPreparacion | null, 
 
 export function AppContent({ BusinessHome }: { BusinessHome: ComponentType<BusinessHomeProps> }) {
   const reduceMotion = useReducedMotion();
+  const { isCompact } = useResponsiveLayout();
   const [booting, setBooting] = useState(true);
   const [mode, setMode] = useState<AuthMode>('login');
   const [loading, setLoading] = useState(false);
@@ -763,7 +765,7 @@ export function AppContent({ BusinessHome }: { BusinessHome: ComponentType<Busin
   const [changeForm, setChangeForm] = useState<ChangePasswordRequest>(initialChangeForm);
 
   useEffect(() => {
-    const captureIncomingPdf = (uri: string | null) => {
+    const captureIncomingPdf = (uri: string | null | undefined) => {
       if (uri?.startsWith('content://') || uri?.startsWith('file://')) setIncomingPdfUri(uri);
     };
     void Linking.getInitialURL().then(captureIncomingPdf).catch(() => undefined);
@@ -957,9 +959,13 @@ export function AppContent({ BusinessHome }: { BusinessHome: ComponentType<Busin
 
       const response = await register({
         ...registerForm,
-        avatarUrl: registerForm.avatarUrl || initialsAvatarDataUri(registerForm.nombres, registerForm.apellidos, registerForm.razonSocial),
+        avatarUrl: registerForm.avatarUrl,
       });
+      if (!response.success) {
+        throw new ApiError(400, response.message?.trim() || 'El servidor no pudo crear la cuenta. Revisa los datos e intenta nuevamente.');
+      }
       setMessage({ type: 'success', text: response.message ?? 'Cuenta creada correctamente.' });
+      setRegisterForm(initialRegisterForm);
       setRegisterStep(0);
       setMode('login');
     });
@@ -1010,7 +1016,7 @@ export function AppContent({ BusinessHome }: { BusinessHome: ComponentType<Busin
 
   const continueRegister = () => {
     const validation = registerStep === 0
-      ? validateRegisterForm({ ...registerForm, email: 'paso@efact.local', direccion: 'Direccion temporal', password: 'Aa1!aaaa' })
+      ? validateRegisterForm({ ...registerForm, email: 'paso@efact.local', direccion: 'Direccion temporal', celular: '0999999999', password: 'Aa1!aaaa' })
       : registerStep === 1
         ? validateRegisterForm({ ...registerForm, password: 'Aa1!aaaa' })
         : validateRegisterForm(registerForm);
@@ -1110,7 +1116,7 @@ export function AppContent({ BusinessHome }: { BusinessHome: ComponentType<Busin
 
   return (
     <>
-      <ScreenFrame centered={mode !== 'register'}>
+      <ScreenFrame centered>
         <AuthCard key={mode} wide={mode === 'register'} login={mode === 'login'} reduceMotion={reduceMotion}>
         {mode === 'login' ? (
           <>
@@ -1186,13 +1192,13 @@ export function AppContent({ BusinessHome }: { BusinessHome: ComponentType<Busin
               <View style={styles.section}>
                 <Text style={styles.sectionTitle}>¿Cómo vas a usar e-fact?</Text>
                 <Text style={styles.sectionHint}>Elige el tipo de cuenta que mejor describe tu negocio.</Text>
-                <View style={styles.segment}>
+                <View style={[styles.segment, isCompact && styles.responsiveStack]}>
                   <SegmentButton active={registerForm.tipoCliente === 1} icon="account-outline" label="Persona Natural" description="Para una persona" onPress={() => updateRegister('tipoCliente', 1)} />
                   <SegmentButton active={registerForm.tipoCliente === 2} icon="domain" label="Empresa" description="Para un negocio" onPress={() => updateRegister('tipoCliente', 2)} />
                 </View>
                 <Text style={styles.fieldGroupHint}>Selecciona un documento de identificación</Text>
                 <View style={styles.documentOptions}>
-                  <View style={styles.documentOptionRow}>
+                  <View style={[styles.documentOptionRow, isCompact && styles.responsiveStack]}>
                     {([['CEDULA', 'Cédula ecuatoriana', 'card-account-details-outline'], ['RUC', 'Registro tributario', 'file-document-outline']] as [TipoDocumento, string, React.ComponentProps<typeof MaterialCommunityIcons>['name']][]).map(([tipo, description, icon]) => (
                       <SegmentButton
                         key={tipo}

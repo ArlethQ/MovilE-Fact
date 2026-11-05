@@ -1,6 +1,6 @@
 import type { Dispatch, MutableRefObject, SetStateAction } from 'react';
 import { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Animated, AppState, Easing, Image, Keyboard, KeyboardAvoidingView, Platform, Pressable, ScrollView, Text, TextInput, View, useWindowDimensions } from 'react-native';
+import { ActivityIndicator, Alert, Animated, AppState, Easing, Image, Keyboard, KeyboardAvoidingView, Platform, Pressable, ScrollView, Text, TextInput, View, useWindowDimensions, type ScrollViewInstance, type TextInputInstance, type ViewInstance } from 'react-native';
 import * as Speech from 'expo-speech';
 import type * as SpeechRecognition from 'expo-speech-recognition';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -185,9 +185,9 @@ export function EfactBotScreen({
   const queuedRequestsRef = useRef<Array<{ text: string; modo: 'texto' | 'voz'; requestId?: string; messageAdded: boolean }>>([]);
   const botRequestAbortRef = useRef<AbortController | null>(null);
   const messageSequenceRef = useRef(0);
-  const messagesScrollRef = useRef<ScrollView>(null);
-  const botContainerRef = useRef<View>(null);
-  const voiceInputRef = useRef<TextInput>(null);
+  const messagesScrollRef = useRef<ScrollViewInstance>(null);
+  const botContainerRef = useRef<ViewInstance>(null);
+  const voiceInputRef = useRef<TextInputInstance>(null);
   const scopedHistoryReadyRef = useRef(sessionScope !== 'erubrica');
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const compactLayout = windowWidth < 360;

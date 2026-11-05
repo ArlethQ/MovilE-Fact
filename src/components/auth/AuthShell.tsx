@@ -6,8 +6,9 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 
 import { styles } from '../../styles/appStyles';
+import { useResponsiveLayout } from '../../hooks/useResponsiveLayout';
 
-export function ScreenTransition({ children, reduceMotion }: { children: ReactNode; reduceMotion: boolean }) {
+export function ScreenTransition({ children, reduceMotion, fill = true }: { children: ReactNode; reduceMotion: boolean; fill?: boolean }) {
   const opacity = useRef(new Animated.Value(0)).current;
   const translateY = useRef(new Animated.Value(10)).current;
 
@@ -29,16 +30,18 @@ export function ScreenTransition({ children, reduceMotion }: { children: ReactNo
   }, [opacity, reduceMotion, translateY]);
 
   return (
-    <Animated.View style={{ flex: 1, width: '100%', opacity, transform: [{ translateY }] }}>
+    <Animated.View style={{ flex: fill ? 1 : undefined, width: '100%', opacity, transform: [{ translateY }] }}>
       {children}
     </Animated.View>
   );
 }
 
 export function AuthCard({ children, wide, login, reduceMotion }: { children: ReactNode; wide?: boolean; login?: boolean; reduceMotion: boolean }) {
+  const { isCompact, isTablet } = useResponsiveLayout();
+
   return (
-    <ScreenTransition reduceMotion={reduceMotion}>
-      <View style={[styles.card, login && styles.loginCard, wide && styles.cardWide]}>
+    <ScreenTransition reduceMotion={reduceMotion} fill={false}>
+      <View style={[styles.card, login && styles.loginCard, wide && styles.cardWide, isCompact && styles.cardCompact, isTablet && styles.cardTablet]}>
         {children}
       </View>
     </ScreenTransition>

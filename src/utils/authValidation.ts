@@ -46,6 +46,11 @@ export function validateRegisterForm(form: RegisterRequest): ValidationResult {
     return invalid('La direccion debe tener entre 5 y 100 caracteres.');
   }
 
+  const celular = form.celular.replace(/\D/g, '');
+  if (celular.length < 7 || celular.length > 15) {
+    return invalid('Ingresa un numero de celular valido.');
+  }
+
   if (form.tipoCliente === 2) {
     if (!form.razonSocial.trim() || form.razonSocial.trim().length < 3) {
       return invalid('La razon social debe tener al menos 3 caracteres.');

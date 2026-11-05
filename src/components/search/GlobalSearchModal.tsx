@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View, type TextInputInstance } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import type { GlobalSearchResult } from '../../types/globalSearch';
 
@@ -11,7 +11,7 @@ export function GlobalSearchModal({ visible, query, results, onChangeQuery, onCl
   onClose: () => void;
   onOpenResult: (result: GlobalSearchResult) => void;
 }) {
-  const inputRef = useRef<TextInput>(null);
+  const inputRef = useRef<TextInputInstance>(null);
   useEffect(() => {
     if (visible) setTimeout(() => inputRef.current?.focus(), 120);
   }, [visible]);

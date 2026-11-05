@@ -33,6 +33,8 @@ export function logout() {
 }
 
 export function register(request: RegisterRequest) {
+  const avatarUrl = request.avatarUrl.trim();
+
   return apiRequest<RegisterResponse>('/api/auth/register', {
     method: 'POST',
     body: JSON.stringify({
@@ -44,6 +46,7 @@ export function register(request: RegisterRequest) {
       direccion: request.direccion.trim(),
       celular: request.celular.trim(),
       identificacion: request.identificacion.trim(),
+      avatarUrl: avatarUrl.startsWith('data:image/') ? '' : avatarUrl,
     }),
   });
 }
