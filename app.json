@@ -1,0 +1,98 @@
+{
+  "expo": {
+    "name": "Numérica Software",
+    "slug": "efact-mobile",
+    "version": "1.0.0",
+    "orientation": "default",
+    "icon": "./assets/logo-numerica.png",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "infoPlist": {
+        "NSFaceIDUsageDescription": "e-fact usa Face ID para proteger el acceso a tu cuenta.",
+        "NSSpeechRecognitionUsageDescription": "e-fact necesita reconocimiento de voz para procesar tus órdenes de facturación.",
+        "NSMicrophoneUsageDescription": "e-fact necesita el micrófono para recibir tus órdenes de facturación.",
+        "ITSAppUsesNonExemptEncryption": false
+      },
+      "supportsTablet": true,
+      "bundleIdentifier": "com.anonymous.efactmobile"
+    },
+    "android": {
+      "softwareKeyboardLayoutMode": "resize",
+      "adaptiveIcon": {
+        "backgroundColor": "#E6F4FE",
+        "foregroundImage": "./assets/logo-numerica.png"
+      },
+      "predictiveBackGestureEnabled": false,
+      "permissions": [
+        "android.permission.USE_BIOMETRIC",
+        "android.permission.USE_FINGERPRINT",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.INTERNET"
+      ],
+      "blockedPermissions": [
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE"
+      ],
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "category": ["DEFAULT", "BROWSABLE"],
+          "data": {
+            "scheme": "content",
+            "mimeType": "application/pdf"
+          }
+        },
+        {
+          "action": "VIEW",
+          "category": ["DEFAULT", "BROWSABLE"],
+          "data": {
+            "scheme": "file",
+            "mimeType": "application/pdf"
+          }
+        }
+      ],
+      "package": "com.anonymous.efactmobile"
+    },
+    "plugins": [
+      [
+        "expo-local-authentication",
+        {
+          "faceIDPermission": "e-fact usa Face ID para proteger el acceso a tu cuenta."
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "color": "#0072BD",
+          "defaultChannel": "efact-activity"
+        }
+      ],
+      "expo-secure-store",
+      [
+        "expo-file-system",
+        {
+          "enableFileSharing": true
+        }
+      ],
+      "expo-font",
+      "expo-sharing",
+      "expo-status-bar",
+      [
+        "expo-speech-recognition",
+        {
+          "microphonePermission": "e-fact necesita el micrófono para recibir tus órdenes de facturación.",
+          "speechRecognitionPermission": "e-fact necesita reconocimiento de voz para procesar tus órdenes de facturación."
+        }
+      ],
+      "@react-native-community/datetimepicker"
+    ],
+    "web": {
+      "favicon": "./assets/logo-numerica.png"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "15ace1fd-fc9b-4ea4-9d27-aaed2b540429"
+      }
+    }
+  }
+}
