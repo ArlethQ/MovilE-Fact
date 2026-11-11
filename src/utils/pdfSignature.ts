@@ -118,7 +118,7 @@ export function buildPdfViewerHtml({ base64, pdfJsSource, workerSource, page, se
   selectable: boolean;
 }) {
   const clickHandler = selectable ? buildPdfSignatureInteractionScript() : '';
-    return `<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"/>
+  return `<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"/>
       <style>
         html,body{margin:0;background:#eef3f7}
         #stage{text-align:center;padding:12px;box-sizing:border-box}
@@ -128,17 +128,14 @@ export function buildPdfViewerHtml({ base64, pdfJsSource, workerSource, page, se
           font:700 clamp(7px,2.5vw,11px)/1 Arial;white-space:nowrap;overflow:hidden;border-radius:4px;
           display:flex;align-items:center;justify-content:center;box-sizing:border-box;touch-action:none}
       </style></head><body><div id="stage"><div id="viewer"><canvas id="canvas"></canvas></div></div>
-      <script type="module">${pdfJsSource}
+      <script type="module">${workerSource}</script><script type="module">${pdfJsSource}
       (async () => {
         const raw = atob('${base64}');
         const bytes = new Uint8Array(raw.length);
         for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
-        const workerUrl = URL.createObjectURL(new Blob([${JSON.stringify(workerSource).replace(/</g, '\\u003c')}], { type: 'text/javascript' }));
-        GlobalWorkerOptions.workerSrc = workerUrl;
         const task = getDocument({ data: bytes });
         window.addEventListener('pagehide', () => {
           void task.destroy();
-          URL.revokeObjectURL(workerUrl);
         }, { once: true });
         const documentPdf = await task.promise;
         const send = message => window.ReactNativeWebView.postMessage(JSON.stringify(message));
