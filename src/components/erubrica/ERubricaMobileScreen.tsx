@@ -171,9 +171,9 @@ function usePdfJsSource(uri: string) {
   return source;
 }
 
-function writeBinaryCacheFile(fileName: string, bytes: ArrayBuffer) {
+async function writeBinaryCacheFile(fileName: string, bytes: ArrayBuffer) {
   const file = new File(Paths.cache, fileName);
-  file.write(new Uint8Array(bytes));
+  await file.write(new Uint8Array(bytes));
   return file.uri;
 }
 
@@ -909,7 +909,7 @@ export function ERubricaMobileScreen({
   const descargarFirmaSolicitud = async (solicitudId: number) => {
     try {
       const result = await descargarERubricaFirmaP12(solicitudId);
-      const uri = writeBinaryCacheFile(`firma-${solicitudId}.p12`, result.bytes);
+      const uri = await writeBinaryCacheFile(`firma-${solicitudId}.p12`, result.bytes);
       if (await Sharing.isAvailableAsync()) await Sharing.shareAsync(uri, { mimeType: 'application/x-pkcs12', dialogTitle: 'Guardar firma .p12' });
     } catch (error) {
       Alert.alert('No se pudo descargar la firma', error instanceof ApiError ? error.message : 'La firma aún no está disponible.');
@@ -1040,7 +1040,7 @@ export function ERubricaMobileScreen({
       setCertificateFile(file);
     }
   };
-  const signPdfDocument = async (preview = false) => {
+  const signPdfDocument = async () => {
     if (signingRef.current) return;
     if (!pdfFile) {
       Alert.alert('Datos incompletos', 'Selecciona un PDF válido.');
@@ -1085,20 +1085,16 @@ export function ERubricaMobileScreen({
       if (documentoPendienteSeleccionado) form.append('documentoPendiente', documentoPendienteSeleccionado);
       const result = await firmarERubricaDocumento(form, selloAvanzado);
       const signedName = `${(pdfFile.name || 'documento.pdf').replace(/\.pdf$/i, '')}_firmado.pdf`;
-      const uri = writeBinaryCacheFile(`${Date.now()}-${buildDeviceFileName(signedName, '.pdf')}`, result.bytes);
-      if (preview) {
-        onPreviewPdf({ uri, name: signedName, mimeType: 'application/pdf' });
-      } else {
-        setSignedFileUri(uri);
-        if (documentoPendienteSeleccionado) {
-          setDocumentosPendientes((current) => current.filter((item) => item.nombreArchivo !== documentoPendienteSeleccionado));
-          setDocumentoPendienteSeleccionado(null);
-        }
-        Alert.alert('Documento firmado', 'El PDF se firmó correctamente. ¿Qué deseas hacer ahora?', [
-          { text: 'Después', style: 'cancel' },
-          { text: 'Compartir ahora', onPress: () => { void shareSignedDocument(); } },
-        ]);
+      const uri = await writeBinaryCacheFile(`${Date.now()}-${buildDeviceFileName(signedName, '.pdf')}`, result.bytes);
+      setSignedFileUri(uri);
+      if (documentoPendienteSeleccionado) {
+        setDocumentosPendientes((current) => current.filter((item) => item.nombreArchivo !== documentoPendienteSeleccionado));
+        setDocumentoPendienteSeleccionado(null);
       }
+      Alert.alert('Documento firmado', 'El PDF se firmó correctamente. ¿Qué deseas hacer ahora?', [
+        { text: 'Después', style: 'cancel' },
+        { text: 'Compartir ahora', onPress: () => { void shareSignedDocument(); } },
+      ]);
     } catch (error) {
       Alert.alert('No se pudo firmar', error instanceof ApiError ? error.message : 'Verifica los archivos y la clave del certificado.');
     } finally {
@@ -1123,7 +1119,7 @@ export function ERubricaMobileScreen({
         ?? firmaEmisores.find((item) => item.tieneCertificado && item.tieneClave)?.razonSocial,
     });
     Alert.alert(confirmation.title, confirmation.message, [
-      { text: 'Revisar', style: 'cancel' },
+      { text: 'Revisar', style: 'cancel', onPress: () => onPreviewPdf({ uri: pdfFile.uri, name: pdfFile.name || 'documento.pdf', mimeType: 'application/pdf' }) },
       { text: 'Firmar ahora', onPress: () => { void signPdfDocument(); } },
     ]);
   };
@@ -2269,7 +2265,7 @@ export function ERubricaMobileScreen({
                 try {
               const solId = Number(label(item, ['solId', 'SolId', 'id'], '0'));
                   const result = await descargarERubricaFirmaP12(solId);
-                  const uri = writeBinaryCacheFile(`firma-${solId}.p12`, result.bytes);
+                  const uri = await writeBinaryCacheFile(`firma-${solId}.p12`, result.bytes);
                   if (await Sharing.isAvailableAsync()) await Sharing.shareAsync(uri, { mimeType: 'application/x-pkcs12', dialogTitle: 'Compartir firma .p12' });
                 } catch (error) { Alert.alert('No se pudo descargar', error instanceof ApiError ? error.message : 'La firma no está disponible.'); }
               }} /> : null}

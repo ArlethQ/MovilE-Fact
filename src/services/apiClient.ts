@@ -291,11 +291,19 @@ function logApiError(
 
   const bodyText = typeof body === 'string' ? body : JSON.stringify(body, null, 2);
   const preview = sanitizeDiagnosticBody(bodyText);
+  const parsed = typeof body === 'string' ? safeParseJson(body) : body;
+  const details = parsed && typeof parsed === 'object' ? parsed as Record<string, unknown> : {};
+  const upstreamStatus = typeof details.estado === 'number' && Number.isInteger(details.estado)
+    && details.estado >= 100 && details.estado <= 599 ? details.estado : undefined;
+  const traceId = typeof details.traceId === 'string' && /^[a-z0-9:-]{1,128}$/i.test(details.traceId)
+    ? details.traceId : undefined;
   console.error('[API ERROR]', {
     baseUrl: API_BASE_URL,
     path,
     method: context.method ?? 'GET',
     status,
+    upstreamStatus,
+    traceId,
     elapsedMs: context.elapsedMs,
     timeoutMs: context.timeoutMs,
     contentType: context.contentType,
