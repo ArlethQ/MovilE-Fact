@@ -225,8 +225,11 @@ export const validarERubricaFirmaPdf = (pdf: { uri: string; name: string; mimeTy
   return apiRequest<unknown>(`${ROOT}/documentos/validar-firma`, { method: 'POST', body: form, timeoutMs: 30000 });
 };
 
-export const firmarERubricaDocumento = (form: FormData) =>
-  apiRequestBinary(`${ROOT}/documentos/firmar`, { method: 'POST', body: form, timeoutMs: 60000 });
+export const firmarERubricaDocumento = (form: FormData, selloAvanzado = false) => {
+  // E-FACT must bind this form field and forward it to FirmaStampApiService.EstamparAsync.
+  form.append('selloAvanzado', selloAvanzado ? 'true' : 'false');
+  return apiRequestBinary(`${ROOT}/documentos/firmar`, { method: 'POST', body: form, timeoutMs: 60000 });
+};
 
 export type ERubricaPagoResponse = {
   paymentUrl?: string | null;
