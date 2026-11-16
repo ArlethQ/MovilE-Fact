@@ -1,4 +1,4 @@
-import { apiRequest, apiRequestBinary } from './apiClient';
+import { ApiError, apiRequest, apiRequestBinary } from './apiClient';
 import { FirmaEstado } from '../types/business';
 import { ERUBRICA_SOLICITUD_PAGO_PATH, ERUBRICA_SOLICITUD_PATH, ERUBRICA_SOLICITUD_TRANSFERENCIA_PATH } from '../config/api';
 import { appendMobileFile } from './mobileFileUpload';
@@ -151,6 +151,17 @@ export type ERubricaDocumentoPendiente = {
 
 export const getERubricaDocumentosPendientes = () =>
   apiRequest<ERubricaDocumentoPendiente[]>(`${ROOT}/documentos/pendientes`);
+
+export const descargarERubricaDocumentoPendiente = async (nombreArchivo: string) => {
+  const result = await apiRequestBinary(`${ROOT}/documentos/pendientes/archivo?nombreArchivo=${encodeURIComponent(nombreArchivo)}`);
+  const header = new Uint8Array(result.bytes, 0, Math.min(5, result.bytes.byteLength));
+  if (![37, 80, 68, 70, 45].every((byte, index) => header[index] === byte)) {
+    throw new ApiError(200, result.contentType.toLowerCase().includes('text/html')
+      ? 'E-FACT devolvió una página web en lugar del PDF. Revisa la sesión y vuelve a intentarlo.'
+      : 'E-FACT no devolvió un PDF válido. Vuelve a cargar el documento e inténtalo de nuevo.');
+  }
+  return result;
+};
 
 export const cargarERubricaDocumentoPendiente = (pdf: { uri: string; name: string; mimeType?: string | null }) => {
   const form = new FormData();

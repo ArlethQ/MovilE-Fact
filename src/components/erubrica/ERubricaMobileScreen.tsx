@@ -25,7 +25,7 @@ import { WebView } from 'react-native-webview';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { API_BASE_URL } from '../../config/api';
 import { ApiError, getAuthSessionCookie } from '../../services/apiClient';
-import { ERubricaDashboard, ERubricaDocumentoFirmado, ERubricaDocumentoPendiente, ERubricaEmisor, ERubricaFirmaEstado, ERubricaSolicitudBorrador, appendERubricaFile, buscarERubricaSolicitudesProveedor, cargarERubricaDocumentoPendiente, configurarERubricaFirma, crearERubricaSolicitud, descargarERubricaFirmaP12, eliminarERubricaDocumentoPendiente, eliminarERubricaSolicitudBorrador, enviarTransferenciaERubricaSolicitud, firmarERubricaDocumento, getERubricaDocumentosFirmados, getERubricaDocumentosPendientes, getERubricaEmisores, getERubricaFirmaEstado, getERubricaPlan, getERubricaProductos, getERubricaRenovacion, getERubricaSaldo, getERubricaSolicitudBorradores, guardarERubricaSolicitudBorrador, iniciarPagoERubricaSolicitud, sincronizarERubricaSolicitud, validarERubricaFirmaPdf, validarERubricaFirmaTemporal, validarERubricaQr } from '../../services/erubricaMobileService';
+import { ERubricaDashboard, ERubricaDocumentoFirmado, ERubricaDocumentoPendiente, ERubricaEmisor, ERubricaFirmaEstado, ERubricaSolicitudBorrador, appendERubricaFile, buscarERubricaSolicitudesProveedor, cargarERubricaDocumentoPendiente, configurarERubricaFirma, crearERubricaSolicitud, descargarERubricaDocumentoPendiente, descargarERubricaFirmaP12, eliminarERubricaDocumentoPendiente, eliminarERubricaSolicitudBorrador, enviarTransferenciaERubricaSolicitud, firmarERubricaDocumento, getERubricaDocumentosFirmados, getERubricaDocumentosPendientes, getERubricaEmisores, getERubricaFirmaEstado, getERubricaPlan, getERubricaProductos, getERubricaRenovacion, getERubricaSaldo, getERubricaSolicitudBorradores, guardarERubricaSolicitudBorrador, iniciarPagoERubricaSolicitud, sincronizarERubricaSolicitud, validarERubricaFirmaPdf, validarERubricaFirmaTemporal, validarERubricaQr } from '../../services/erubricaMobileService';
 import { EFACT_THEME, ERUBRICA_COLORS } from '../../styles/theme';
 import { formatDocumentDate } from '../../utils/documentFormatting';
 import { buildSignatureConfirmation } from '../../utils/signatureConfirmation';
@@ -918,14 +918,14 @@ export function ERubricaMobileScreen({
   const usarDocumentoPendiente = async (documento: ERubricaDocumentoPendiente) => {
     try {
       setLoadingDocumentosPendientes(true);
-      const url = getDocumentAssetUrl(documento.url);
-      const directory = FileSystem.cacheDirectory ?? FileSystem.documentDirectory;
-      if (!url || !directory) throw new Error('missing-document');
-      const cookie = getAuthSessionCookie();
-      const download = await FileSystem.downloadAsync(url, `${directory}firmar-${Date.now()}-${buildDeviceFileName(documento.nombreDocumento, '.pdf')}`, cookie ? { headers: { Cookie: cookie } } : undefined);
+      const result = await descargarERubricaDocumentoPendiente(documento.nombreArchivo);
+      const uri = await writeBinaryCacheFile(`firmar-${buildDeviceFileName(documento.nombreDocumento, '.pdf')}`, result.bytes);
       selectTab('firmar');
-      setPdfFile({ uri: download.uri, name: documento.nombreDocumento, mimeType: 'application/pdf' });
+      setPdfFile({ uri, name: documento.nombreDocumento, mimeType: 'application/pdf' });
       setDocumentoPendienteSeleccionado(documento.nombreArchivo);
+      setSignedFileUri(null);
+      setValidationPage(1);
+      setValidationPageCount(1);
       reiniciarUbicacionesFirma();
       seleccionarCantidadUbicaciones();
     } catch (error) {
