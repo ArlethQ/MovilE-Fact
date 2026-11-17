@@ -982,7 +982,7 @@ export function BusinessHomeLayout({ context }: { context: BusinessHomeLayoutCon
             <Pressable
               accessibilityLabel="Cerrar sesion"
               accessibilityRole="button"
-              style={styles.menuLogoutButton}
+              style={[styles.menuLogoutButton, { marginBottom: Math.max(8, insets.bottom) }]}
               onPress={() => {
                 setMenuOpen(false);
                 onLogout();
