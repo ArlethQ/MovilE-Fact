@@ -221,8 +221,26 @@ export function BusinessHomeLayout({ context }: { context: BusinessHomeLayoutCon
     );
   };
 
+  const bottomNavigation = activeView !== 'portal' ? (
+    <PortalBottomNav
+      docked={activeView === 'bot'}
+      bottomInset={insets.bottom}
+      activeView={activeView === 'e-rubrica' ? `e-rubrica-${erubricaTabRequest ?? 'inicio'}` : activeView}
+      mode={isERubricaWorkspace ? 'erubrica' : 'efact'}
+      onServices={() => canUsePortal ? openView('portal') : setMenuOpen(true)}
+      onHome={() => isERubricaWorkspace ? openView('e-rubrica') : openView('dashboard')}
+      onNew={() => openView(initialSetupComplete ? 'nueva-factura' : 'dashboard')}
+      onFirma={() => isERubricaWorkspace ? setMenuOpen(true) : openView('firma')}
+      onProfile={() => isERubricaWorkspace ? openView('perfil-e-rubrica') : openView('perfil')}
+      onMenu={() => setMenuOpen(true)}
+      onSolicitudes={() => openERubricaTab('nueva-solicitud')}
+      onFirmar={() => openERubricaTab('firmar')}
+      onValidar={() => openERubricaTab('validar')}
+    />
+  ) : null;
+
   return (
-    <SafeAreaView edges={['top', 'bottom']} style={[styles.workspaceSafeArea, activeView === 'portal' && styles.portalSafeArea, isERubricaWorkspace && styles.erubricaSafeArea]}>
+    <SafeAreaView edges={['top', 'bottom', 'left', 'right']} style={[styles.workspaceSafeArea, activeView === 'portal' && styles.portalSafeArea, isERubricaWorkspace && styles.erubricaSafeArea]}>
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.flex}>
       <View style={styles.workspaceChrome}>
         <GlobalWorkspaceHeader
@@ -785,7 +803,6 @@ export function BusinessHomeLayout({ context }: { context: BusinessHomeLayoutCon
             voiceOnly={activeView !== 'bot'}
             embedded={activeView === 'bot'}
             viewKey={activeView}
-            bottomInset={activeView === 'bot' ? Math.max(80, insets.bottom + 76) : 0}
             userName={portalFirstName}
             userId={userId}
             reduceMotion={reduceMotion}
@@ -803,23 +820,9 @@ export function BusinessHomeLayout({ context }: { context: BusinessHomeLayoutCon
         ) : null}
         </View>
       </View>
+      {activeView === 'bot' ? bottomNavigation : null}
       </KeyboardAvoidingView>
-      {activeView !== 'portal' ? (
-        <PortalBottomNav
-          bottomInset={insets.bottom}
-           activeView={activeView === 'e-rubrica' ? `e-rubrica-${erubricaTabRequest ?? 'inicio'}` : activeView}
-           mode={isERubricaWorkspace ? 'erubrica' : 'efact'}
-           onServices={() => canUsePortal ? openView('portal') : setMenuOpen(true)}
-          onHome={() => isERubricaWorkspace ? openView('e-rubrica') : openView('dashboard')}
-          onNew={() => openView(initialSetupComplete ? 'nueva-factura' : 'dashboard')}
-          onFirma={() => isERubricaWorkspace ? setMenuOpen(true) : openView('firma')}
-          onProfile={() => isERubricaWorkspace ? openView('perfil-e-rubrica') : openView('perfil')}
-          onMenu={() => setMenuOpen(true)}
-          onSolicitudes={() => openERubricaTab('nueva-solicitud')}
-          onFirmar={() => openERubricaTab('firmar')}
-          onValidar={() => openERubricaTab('validar')}
-        />
-      ) : null}
+      {activeView !== 'bot' ? bottomNavigation : null}
       <InitialSequenceModal
         visible={Boolean(sequencePrompt)}
         documentLabel={sequencePrompt?.documentLabel ?? 'documentos'}

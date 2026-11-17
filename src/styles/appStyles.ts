@@ -3775,6 +3775,15 @@ export const styles = StyleSheet.create({
     right: 8,
     paddingHorizontal: 4,
   },
+  portalBottomNavDocked: {
+    alignSelf: 'stretch',
+    borderRadius: 0,
+    bottom: 0,
+    flexShrink: 0,
+    left: 0,
+    position: 'relative',
+    right: 0,
+  },
   portalBottomNavERubrica: {
     borderColor: ERUBRICA_COLORS.border,
     shadowColor: ERUBRICA_COLORS.dark,
@@ -8228,7 +8237,6 @@ export const styles = StyleSheet.create({
   botWorkspaceHiddenScroll: { display: 'none' },
   erubricaBotScreen: { backgroundColor: '#F5FCF7', borderColor: '#9BDDB0' },
   botScreenInner: { flex: 1 },
-  botScreenKeyboard: { minHeight: 0 },
   botWidgetHeader: { alignItems: 'center', backgroundColor: '#0878C9', flexDirection: 'row', gap: 10, paddingHorizontal: 14, paddingVertical: 12 },
   erubricaBotWidgetHeader: { backgroundColor: '#087C3A' },
   botWidgetAvatar: { backgroundColor: '#FFFFFF', borderColor: '#FFFFFF', borderRadius: 18, borderWidth: 2, height: 36, width: 36 },

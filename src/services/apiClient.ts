@@ -9,7 +9,7 @@ const REQUEST_TIMEOUT_MS = 20000;
 const DEFAULT_ERROR_MESSAGE = 'No se pudo completar la solicitud. Intenta nuevamente.';
 
 let authSessionCookie: string | null = null;
-let authFailureHandler: (() => void) | null = null;
+let authFailureHandler: ((error: ApiError) => void) | null = null;
 
 export function clearAuthSession() {
   authSessionCookie = null;
@@ -19,7 +19,7 @@ export function getAuthSessionCookie() {
   return authSessionCookie;
 }
 
-export function setAuthFailureHandler(handler: (() => void) | null) {
+export function setAuthFailureHandler(handler: ((error: ApiError) => void) | null) {
   authFailureHandler = handler;
 }
 
@@ -31,6 +31,16 @@ export class ApiError extends Error {
     this.name = 'ApiError';
     this.status = status;
   }
+}
+
+function isSessionConflict(status: number, message: string) {
+  if (status === 409) return true;
+  if (![400, 401, 403, 423].includes(status)) return false;
+  return /sesi[oó]n\s+(?:ya\s+)?(?:activa|abierta)|sesi[oó]n.*(?:otro dispositivo|otro equipo)|(?:otro dispositivo|otro equipo).*sesi[oó]n/i.test(message);
+}
+
+export function isSessionConflictError(error: unknown): error is ApiError {
+  return error instanceof ApiError && isSessionConflict(error.status, error.message);
 }
 
 export async function apiRequest<T>(path: string, options: RequestOptions = {}): Promise<T> {
@@ -93,11 +103,12 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
   const body = contentType.includes('application/json') && text ? safeParseJson(text) : text;
 
   if (!response.ok) {
+    const message = getErrorMessage(response.status, body, path);
+    const error = new ApiError(response.status, message);
     if (response.status === 401) {
       clearAuthSession();
-      if (!path.startsWith('/api/auth/')) authFailureHandler?.();
+      if (!path.startsWith('/api/auth/')) authFailureHandler?.(error);
     }
-    const message = getErrorMessage(response.status, body, path);
     if (!suppressErrorLog) {
       logApiError(path, response.status, body, {
         contentType,
@@ -108,7 +119,7 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
       });
     }
 
-    throw new ApiError(response.status, message);
+    throw error;
   }
 
   return body as T;
@@ -142,10 +153,7 @@ export async function apiRequestBinary(path: string, options: RequestOptions = {
   }
 
   if (!response.ok) {
-    if (response.status === 401) {
-      clearAuthSession();
-      if (!path.startsWith('/api/auth/')) authFailureHandler?.();
-    }
+    if (response.status === 401) clearAuthSession();
     let text: string;
     try {
       text = await response.text();
@@ -153,6 +161,8 @@ export async function apiRequestBinary(path: string, options: RequestOptions = {
       clearTimeout(timeout);
     }
     const message = getErrorMessage(response.status, text, path);
+    const error = new ApiError(response.status, message);
+    if (response.status === 401 && !path.startsWith('/api/auth/')) authFailureHandler?.(error);
     if (!suppressErrorLog) {
       logApiError(path, response.status, text, {
         contentType: response.headers.get('content-type') ?? '',
@@ -162,7 +172,7 @@ export async function apiRequestBinary(path: string, options: RequestOptions = {
         userMessage: message,
       });
     }
-    throw new ApiError(response.status, message);
+    throw error;
   }
 
   try {
@@ -189,6 +199,10 @@ function getErrorMessage(status: number, body: unknown, path: string) {
   const bodyMessage = getBodyErrorMessage(body);
   const normalizedPath = path.toLowerCase().replace(/\/+$/, '');
 
+  if (normalizedPath === '/api/auth/login' && isSessionConflict(status, bodyMessage)) {
+    return bodyMessage || 'Esta cuenta ya tiene una sesión abierta en otro dispositivo.';
+  }
+
   if (status === 401 && normalizedPath === '/api/auth/login') {
     return getLoginErrorMessage(bodyMessage);
   }
@@ -214,7 +228,9 @@ function getErrorMessage(status: number, body: unknown, path: string) {
   }
 
   if (status === 401) {
-    return 'Tu sesión expiró. Inicia sesión nuevamente.';
+    return isSessionConflict(status, bodyMessage)
+      ? 'Tu sesión se cerró porque se inició en otro dispositivo.'
+      : 'Tu sesión expiró. Inicia sesión nuevamente.';
   }
 
   if (status === 403) {

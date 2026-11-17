@@ -1,6 +1,6 @@
 import type { Dispatch, MutableRefObject, SetStateAction } from 'react';
 import { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Animated, AppState, Easing, Image, Keyboard, KeyboardAvoidingView, Platform, Pressable, ScrollView, Text, TextInput, View, useWindowDimensions, type ScrollViewInstance, type TextInputInstance, type ViewInstance } from 'react-native';
+import { ActivityIndicator, Alert, Animated, AppState, Easing, Image, KeyboardAvoidingView, Platform, Pressable, ScrollView, Text, TextInput, View, useWindowDimensions, type ScrollViewInstance, type TextInputInstance } from 'react-native';
 import * as Speech from 'expo-speech';
 import type * as SpeechRecognition from 'expo-speech-recognition';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -90,7 +90,6 @@ export function EfactBotScreen({
   voiceControlsRef,
   voiceOnly = false,
   embedded = false,
-  bottomInset = 0,
   reduceMotion = false,
   messages,
   setMessages,
@@ -115,7 +114,6 @@ export function EfactBotScreen({
   voiceControlsRef?: MutableRefObject<BotVoiceControls | null>;
   voiceOnly?: boolean;
   embedded?: boolean;
-  bottomInset?: number;
   reduceMotion?: boolean;
   messages: BotMessage[];
   setMessages: Dispatch<SetStateAction<BotMessage[]>>;
@@ -154,9 +152,6 @@ export function EfactBotScreen({
   const [speechMuted, setSpeechMuted] = useState(false);
   const [quickActionsOpen, setQuickActionsOpen] = useState(false);
   const [attachmentsOpen, setAttachmentsOpen] = useState(false);
-  const [keyboardVisible, setKeyboardVisible] = useState(false);
-  const [keyboardTop, setKeyboardTop] = useState<number | null>(null);
-  const [chatTop, setChatTop] = useState<number | null>(null);
   const voiceHolding = useRef(false);
   const voiceShouldSubmit = useRef(false);
   const voiceRecognitionStarted = useRef(false);
@@ -186,12 +181,10 @@ export function EfactBotScreen({
   const botRequestAbortRef = useRef<AbortController | null>(null);
   const messageSequenceRef = useRef(0);
   const messagesScrollRef = useRef<ScrollViewInstance>(null);
-  const botContainerRef = useRef<ViewInstance>(null);
   const voiceInputRef = useRef<TextInputInstance>(null);
   const scopedHistoryReadyRef = useRef(sessionScope !== 'erubrica');
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const compactLayout = windowWidth < 360;
-  const windowHeightRef = useRef(windowHeight);
 
   useEffect(() => {
     if (workflow === undefined) return;
@@ -367,10 +360,6 @@ export function EfactBotScreen({
     setAttachmentsOpen(false);
   };
 
-  useEffect(() => {
-    windowHeightRef.current = windowHeight;
-  }, [windowHeight]);
-
   useEffect(() => () => {
     requestGenerationRef.current += 1;
     queuedRequestsRef.current = [];
@@ -401,36 +390,6 @@ export function EfactBotScreen({
     });
 
     return () => subscription.remove();
-  }, []);
-
-  const measureChatTop = () => {
-    requestAnimationFrame(() => {
-      const container = botContainerRef.current;
-      if (!container || typeof container.measureInWindow !== 'function') return;
-      container.measureInWindow((_x: number, y: number) => {
-        if (Number.isFinite(y)) setChatTop(y);
-      });
-    });
-  };
-
-  useEffect(() => {
-    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
-    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
-    const showSubscription = Keyboard.addListener(showEvent, (event) => {
-      setKeyboardVisible(true);
-      const nextKeyboardTop = event.endCoordinates?.screenY ?? windowHeightRef.current - (event.endCoordinates?.height ?? 0);
-      setKeyboardTop(nextKeyboardTop);
-      measureChatTop();
-    });
-    const hideSubscription = Keyboard.addListener(hideEvent, () => {
-      setKeyboardVisible(false);
-      setKeyboardTop(null);
-      measureChatTop();
-    });
-    return () => {
-      showSubscription.remove();
-      hideSubscription.remove();
-    };
   }, []);
 
   const scrollMessagesToEnd = (animated = true) => {
@@ -1024,8 +983,8 @@ export function EfactBotScreen({
   }
 
   return (
-    <View ref={botContainerRef} onLayout={measureChatTop} style={[styles.botScreen, bottomInset > 0 && !keyboardVisible && { paddingBottom: bottomInset }, !embedded && { minHeight: Math.min(560, Math.max(420, windowHeight - 300)) }, embedded && styles.botScreenEmbedded, erubricaTheme && styles.erubricaBotScreen, keyboardVisible && styles.botScreenKeyboard, keyboardVisible && keyboardTop !== null && chatTop !== null ? { height: Math.max(1, keyboardTop - chatTop) } : null]}>
-      <KeyboardAvoidingView style={styles.botScreenInner} behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={Platform.OS === 'ios' ? 8 : 0}>
+    <View style={[styles.botScreen, !embedded && { minHeight: Math.min(560, Math.max(420, windowHeight - 300)) }, embedded && styles.botScreenEmbedded, erubricaTheme && styles.erubricaBotScreen]}>
+      <View style={styles.botScreenInner}>
       <View style={[styles.botWidgetHeader, erubricaTheme && styles.erubricaBotWidgetHeader]}>
         <Image source={require('../../../assets/numi-chat-avatar.jpg')} style={styles.botWidgetAvatar} />
         <View style={styles.botWidgetCopy}>
@@ -1189,7 +1148,7 @@ export function EfactBotScreen({
           <Text style={styles.botSendText}>➤</Text>
         </Pressable>
       </View>
-      </KeyboardAvoidingView>
+      </View>
       {renderVoiceOverlay()}
     </View>
   );

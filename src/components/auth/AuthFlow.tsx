@@ -4,14 +4,14 @@ import * as LocalAuthentication from 'expo-local-authentication';
 import * as SecureStore from 'expo-secure-store';
 import NetInfo, { type NetInfoState } from '@react-native-community/netinfo';
 import { useEffect, useState, type ComponentType } from 'react';
-import { AccessibilityInfo, Alert, Image, ImageSourcePropType, Linking, Modal, Platform, Pressable, ScrollView, Text, View } from 'react-native';
+import { AccessibilityInfo, Alert, AppState, Image, ImageSourcePropType, Linking, Modal, Platform, Pressable, ScrollView, Text, View } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 
-import { ApiError, clearAuthSession, setAuthFailureHandler } from '../../services/apiClient';
+import { ApiError, clearAuthSession, isSessionConflictError, setAuthFailureHandler } from '../../services/apiClient';
 import { clearBotHistory } from '../../services/botService';
 import { API_BASE_URL } from '../../config/api';
 import { acceptPrivacyPolicy, changePassword, checkAuth, login, logout as logoutSession, recoverPassword, register } from '../../services/authService';
-import { ChangePasswordRequest, DynamicMenu, LoginResponse, RegisterRequest, ServiceAccess, TipoDocumento } from '../../types/auth';
+import { ChangePasswordRequest, DynamicMenu, LoginRequest, LoginResponse, RegisterRequest, ServiceAccess, TipoDocumento } from '../../types/auth';
 import { FacturaPreparacion } from '../../services/facturasMobileService';
 import { NotificacionItem } from '../../services/notificacionesService';
 import { PerfilUsuario } from '../../types/business';
@@ -794,12 +794,42 @@ export function AppContent({ BusinessHome }: { BusinessHome: ComponentType<Busin
   };
 
   useEffect(() => {
-    setAuthFailureHandler(() => {
-      Alert.alert('Sesión iniciada en otro dispositivo', 'Tu sesión se cerró porque se inició en otro dispositivo.', [
-        { text: 'Aceptar', onPress: () => resetLocalSession(false) },
-      ]);
+    if (!currentUser) return;
+    let disposed = false;
+    let sessionEnded = false;
+    let checking = false;
+    const endSession = (error: ApiError) => {
+      if (disposed || sessionEnded) return;
+      sessionEnded = true;
+      resetLocalSession(false);
+      Alert.alert('Sesión finalizada', error.message);
+    };
+    const validateSession = async () => {
+      if (disposed || sessionEnded || checking || AppState.currentState !== 'active') return;
+      checking = true;
+      try {
+        const response = await checkAuth();
+        if (response.authenticated === false) {
+          endSession(new ApiError(401, 'Tu sesión finalizó. Inicia sesión nuevamente.'));
+        }
+      } catch (error) {
+        if (error instanceof ApiError && error.status === 401) endSession(error);
+      } finally {
+        checking = false;
+      }
+    };
+    setAuthFailureHandler(endSession);
+    const subscription = AppState.addEventListener('change', (state) => {
+      if (state === 'active') void validateSession();
     });
-    return () => setAuthFailureHandler(null);
+    // Detecta también la revocación cuando el dispositivo anterior permanece abierto sin hacer solicitudes.
+    const interval = setInterval(() => void validateSession(), 60_000);
+    return () => {
+      disposed = true;
+      clearInterval(interval);
+      subscription.remove();
+      setAuthFailureHandler(null);
+    };
   }, [currentUser]);
 
   useEffect(() => {
@@ -873,7 +903,7 @@ export function AppContent({ BusinessHome }: { BusinessHome: ComponentType<Busin
     }
   };
 
-  const applyLoginResponse = async (response: any, username: string, password: string, recordarme: boolean) => {
+  const applyLoginResponse = async (response: LoginResponse, username: string, password: string, recordarme: boolean) => {
     await delay(350);
 
     if (isBackofficeOnlyUser(response)) {
@@ -910,10 +940,34 @@ export function AppContent({ BusinessHome }: { BusinessHome: ComponentType<Busin
     setCurrentUser(response);
   };
 
-  const isSessionConflictError = (error: unknown) => {
-    if (!(error instanceof ApiError)) return false;
-    if (error.status === 409) return true;
-    return /sesi[oó]n.*dispositivo|dispositivo.*sesi[oó]n|otro dispositivo|sesion activa/i.test(error.message);
+  const authenticate = async (request: LoginRequest) => {
+    setAuthenticating(true);
+    try {
+      let response: LoginResponse;
+      try {
+        response = await login(request);
+      } catch (error) {
+        if (!isSessionConflictError(error)) throw error;
+        setAuthenticating(false);
+        const replaceSession = await new Promise<boolean>((resolve) => {
+          Alert.alert(
+            'Sesión abierta en otro dispositivo',
+            'Esta cuenta ya tiene una sesión abierta. Puedes cerrarla en el otro dispositivo e iniciar sesión aquí.',
+            [
+              { text: 'Cancelar', style: 'cancel', onPress: () => resolve(false) },
+              { text: 'Cerrar otra sesión y entrar', onPress: () => resolve(true) },
+            ],
+            { cancelable: true, onDismiss: () => resolve(false) },
+          );
+        });
+        if (!replaceSession) return;
+        setAuthenticating(true);
+        response = await login({ ...request, forzar: true });
+      }
+      await applyLoginResponse(response, request.username, request.password, request.recordarme);
+    } finally {
+      setAuthenticating(false);
+    }
   };
 
   const submitLogin = () =>
@@ -923,50 +977,7 @@ export function AppContent({ BusinessHome }: { BusinessHome: ComponentType<Busin
         setMessage({ type: 'error', text: validation.message ?? '' });
         return;
       }
-
-      setAuthenticating(true);
-
-      try {
-        let response;
-        try {
-          response = await login({ username, password, recordarme });
-        } catch (error) {
-          if (isSessionConflictError(error)) {
-            Alert.alert(
-              'Sesión iniciada en otro dispositivo',
-              error instanceof ApiError ? error.message : 'Esta cuenta ya tiene una sesión activa en otro dispositivo.',
-              [
-                { text: 'Cancelar', style: 'cancel' },
-                {
-                  text: 'Entrar',
-                  onPress: () =>
-                    runRequest(async () => {
-                      setAuthenticating(true);
-                      try {
-                        const forcedResponse = await login({ username, password, recordarme, forzar: true });
-                        await applyLoginResponse(forcedResponse, username, password, recordarme);
-                      } catch (forcedError) {
-                        const text = forcedError instanceof ApiError ? forcedError.message : 'No se pudo completar la solicitud. Intenta nuevamente.';
-                        setMessage({ type: 'error', text });
-                      } finally {
-                        setAuthenticating(false);
-                      }
-                    }),
-                },
-              ],
-            );
-            return;
-          }
-          throw error;
-        }
-
-        await applyLoginResponse(response, username, password, recordarme);
-      } catch (error) {
-        const text = error instanceof ApiError ? error.message : 'No se pudo completar la solicitud. Intenta nuevamente.';
-        setMessage({ type: 'error', text });
-      } finally {
-        setAuthenticating(false);
-      }
+      await authenticate({ username, password, recordarme });
     });
 
   const submitBiometricLogin = () =>
@@ -978,24 +989,7 @@ export function AppContent({ BusinessHome }: { BusinessHome: ComponentType<Busin
         disableDeviceFallback: false,
       });
       if (!result.success) return;
-      setAuthenticating(true);
-      try {
-        const response = await login({ ...biometricCredentials, recordarme: true });
-        if (isBackofficeOnlyUser(response)) {
-          clearAuthSession();
-          setMessage({ type: 'error', text: BACKOFFICE_UNAVAILABLE_MESSAGE });
-          return;
-        }
-        if (response.requierePoliticas) {
-          setPrivacyPendingLogin({ idUsuario: response.idUsuario ?? 0, username: biometricCredentials.username, password: biometricCredentials.password, recordarme: true });
-          setPrivacyAccepted(false);
-          setPrivacyMessage(null);
-          return;
-        }
-        setCurrentUser(response);
-      } finally {
-        setAuthenticating(false);
-      }
+      await authenticate({ ...biometricCredentials, recordarme: true });
     });
 
   const submitRegister = () =>
@@ -1117,21 +1111,14 @@ export function AppContent({ BusinessHome }: { BusinessHome: ComponentType<Busin
       return;
     }
     await acceptPrivacyPolicy(privacyPendingLogin);
-    const response = await login({
+    setPrivacyPendingLogin(null);
+    setPrivacyAccepted(false);
+    setPrivacyMessage(null);
+    await authenticate({
       username: privacyPendingLogin.username,
       password: privacyPendingLogin.password,
       recordarme: privacyPendingLogin.recordarme,
     });
-    setPrivacyPendingLogin(null);
-    setPrivacyAccepted(false);
-    setPrivacyMessage(null);
-    if (response.requiereCambioClave && response.idUsuario) {
-      setChangeForm((current) => ({ ...current, idUsuario: response.idUsuario ?? 0 }));
-      setMode('change');
-      setMessage({ type: 'info', text: 'Ingresa el código de acceso o clave temporal para crear una nueva clave.' });
-      return;
-    }
-    setCurrentUser(response);
   });
 
   if (booting) {
