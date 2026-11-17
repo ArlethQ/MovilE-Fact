@@ -1789,7 +1789,7 @@ export const styles = StyleSheet.create({
     gap: 8,
   },
   unifiedStatusGridCompact: {
-    flexDirection: 'column',
+    flexDirection: 'row',
   },
   unifiedStatusCard: {
     alignItems: 'center',
@@ -3747,6 +3747,7 @@ export const styles = StyleSheet.create({
     width: 38,
   },
   portalBottomNav: {
+    zIndex: 100,
     alignItems: 'center',
     alignSelf: 'center',
     backgroundColor: '#FBFDFF',

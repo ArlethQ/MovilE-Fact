@@ -785,7 +785,7 @@ export function BusinessHomeLayout({ context }: { context: BusinessHomeLayoutCon
             voiceOnly={activeView !== 'bot'}
             embedded={activeView === 'bot'}
             viewKey={activeView}
-            bottomInset={activeView === 'bot' ? 51.5 + insets.bottom : 0}
+            bottomInset={activeView === 'bot' ? Math.max(80, insets.bottom + 76) : 0}
             userName={portalFirstName}
             userId={userId}
             reduceMotion={reduceMotion}

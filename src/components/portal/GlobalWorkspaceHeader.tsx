@@ -78,7 +78,7 @@ export function GlobalWorkspaceHeader({
         )}
       </View>
       {!portalMode ? <View style={[styles.unifiedStatusGrid, compact && styles.unifiedStatusGridCompact]}>
-        {!erubricaMode ? <Pressable style={[styles.unifiedStatusCard, compact && styles.unifiedStatusCardStacked, documentTone.card]} onPress={onDocuments}>
+        {!erubricaMode ? <Pressable style={[styles.unifiedStatusCard, documentTone.card]} onPress={onDocuments}>
           <View style={[styles.unifiedStatusIcon, documentTone.icon]}>
             <MaterialCommunityIcons name="file-document-outline" size={20} color={documentTone.color} />
           </View>
@@ -88,7 +88,7 @@ export function GlobalWorkspaceHeader({
             <Text style={styles.unifiedStatusCaption}>{documentPlan.caption}</Text>
           </View>
         </Pressable> : null}
-        <Pressable style={[styles.unifiedStatusCard, compact && styles.unifiedStatusCardStacked, erubricaMode && styles.unifiedStatusCardFull, firmaTone.card]} onPress={onFirma}>
+        <Pressable style={[styles.unifiedStatusCard, erubricaMode && styles.unifiedStatusCardFull, firmaTone.card]} onPress={onFirma}>
           <View style={[styles.unifiedStatusIcon, styles.unifiedFirmaIcon, firmaTone.icon]}>
             <MaterialCommunityIcons name="shield-check-outline" size={20} color={firmaTone.color} />
           </View>
