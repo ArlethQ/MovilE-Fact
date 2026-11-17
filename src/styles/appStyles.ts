@@ -8304,7 +8304,7 @@ export const styles = StyleSheet.create({
   numiThinkingStepTextActive: { color: '#263A4F', fontWeight: '900' },
   botVoiceTranscript: { alignItems: 'center', backgroundColor: '#EAF5FC', borderTopColor: '#DCEAF3', borderTopWidth: 1, flexDirection: 'row', gap: 7, paddingHorizontal: 14, paddingVertical: 8 },
   botVoiceTranscriptText: { color: '#315A7A', flex: 1, fontSize: 12, fontWeight: '700' },
-  botVoiceOverlayLayer: { alignItems: 'center', bottom: 0, justifyContent: 'flex-end', left: 0, paddingBottom: 72, paddingHorizontal: 12, position: 'absolute', right: 0, top: 0, zIndex: 20 },
+  botVoiceOverlayLayer: { alignItems: 'center', bottom: 0, justifyContent: 'flex-end', left: 0, paddingBottom: 84, paddingHorizontal: 12, position: 'absolute', right: 0, top: 0, zIndex: 20 },
   botVoiceOnlyRoot: { bottom: 0, left: 0, position: 'absolute', right: 0, top: 0, zIndex: 25 },
   botVoiceOverlayBackdrop: { backgroundColor: 'rgba(3, 31, 58, 0.48)', bottom: 0, left: 0, position: 'absolute', right: 0, top: 0 },
   botVoiceOverlayKeyboardAvoider: { alignItems: 'center', flex: 1, justifyContent: 'flex-end', width: '100%' },

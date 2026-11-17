@@ -13,6 +13,7 @@ import {
   Alert,
   Animated,
   AppState,
+  BackHandler,
   Easing,
   Image,
   ImageSourcePropType,
@@ -129,6 +130,15 @@ export function BusinessHome({ currentUser, incomingPdfUri, onIncomingPdfHandled
     if (isSuperAdmin(currentUser)) return 'portal';
     return getAuthorizedViews(getInitialMenus(currentUser)).has('dashboard') ? 'dashboard' : 'e-rubrica';
   });
+  const viewHistoryRef = useRef<WorkspaceView[]>([]);
+  const previousViewRef = useRef<WorkspaceView | null>(null);
+  useEffect(() => {
+    if (previousViewRef.current && previousViewRef.current !== activeView) {
+      viewHistoryRef.current.push(previousViewRef.current);
+      if (viewHistoryRef.current.length > 50) viewHistoryRef.current.shift();
+    }
+    previousViewRef.current = activeView;
+  }, [activeView]);
   const [menuOpen, setMenuOpen] = useState(false);
   const drawerProgress = useRef(new Animated.Value(0)).current;
   const botVoiceControlsRef = useRef<BotVoiceControls | null>(null);
@@ -331,7 +341,24 @@ export function BusinessHome({ currentUser, incomingPdfUri, onIncomingPdfHandled
   const canUseERubrica = userId > 0;
   const canUseFirma = userId > 0;
   const canUsePortal = userId > 0;
-  const portalFirstName = getDisplayFirstName(currentUser, perfilData?.perfil);
+
+  useEffect(() => {
+    const onBackPress = () => {
+      const history = viewHistoryRef.current;
+      if (history.length > 0) {
+        const previous = history.pop();
+        if (previous) setActiveView(previous);
+        return true;
+      }
+      if (activeView !== 'dashboard' && activeView !== 'portal') {
+        setActiveView(canUseEfact ? 'dashboard' : (canUsePortal ? 'portal' : activeView));
+        return true;
+      }
+      return true;
+    };
+    const subscription = BackHandler.addEventListener('hardwareBackPress', onBackPress);
+    return () => subscription.remove();
+  }, [activeView, canUseEfact, canUsePortal]);  const portalFirstName = getDisplayFirstName(currentUser, perfilData?.perfil);
   const portalAvatarUrl = getProfileAvatarUrl(currentUser, perfilData?.perfil);
   const portalServiceCards = useMemo(() => [
     {
@@ -1185,7 +1212,7 @@ export function BusinessHome({ currentUser, incomingPdfUri, onIncomingPdfHandled
 
   useEffect(() => {
     const isInsideEfact = activeView !== 'portal' && activeView !== 'e-rubrica' && activeView !== 'perfil-e-rubrica' && activeView !== 'no-autorizado';
-    const needsFirma = ['emisor', 'nuevo-emisor', 'firma', 'nueva-firma'].includes(activeView);
+    const needsFirma = ['dashboard', 'emisor', 'nuevo-emisor', 'firma', 'nueva-firma'].includes(activeView);
     if (!catalogUserId || !needsFirma || (!canUseFirma && !authorizedViews.has('emisor')) || !isInsideEfact) return;
 
     let mounted = true;

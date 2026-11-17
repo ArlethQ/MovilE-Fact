@@ -1024,7 +1024,7 @@ export function EfactBotScreen({
   }
 
   return (
-    <View ref={botContainerRef} onLayout={measureChatTop} style={[styles.botScreen, bottomInset > 0 && { paddingBottom: bottomInset }, !embedded && { minHeight: Math.min(560, Math.max(420, windowHeight - 300)) }, embedded && styles.botScreenEmbedded, erubricaTheme && styles.erubricaBotScreen, keyboardVisible && styles.botScreenKeyboard, keyboardVisible && keyboardTop !== null && chatTop !== null ? { height: Math.max(1, keyboardTop - chatTop - 36) } : null]}>
+    <View ref={botContainerRef} onLayout={measureChatTop} style={[styles.botScreen, bottomInset > 0 && !keyboardVisible && { paddingBottom: bottomInset }, !embedded && { minHeight: Math.min(560, Math.max(420, windowHeight - 300)) }, embedded && styles.botScreenEmbedded, erubricaTheme && styles.erubricaBotScreen, keyboardVisible && styles.botScreenKeyboard, keyboardVisible && keyboardTop !== null && chatTop !== null ? { height: Math.max(1, keyboardTop - chatTop) } : null]}>
       <KeyboardAvoidingView style={styles.botScreenInner} behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={Platform.OS === 'ios' ? 8 : 0}>
       <View style={[styles.botWidgetHeader, erubricaTheme && styles.erubricaBotWidgetHeader]}>
         <Image source={require('../../../assets/numi-chat-avatar.jpg')} style={styles.botWidgetAvatar} />

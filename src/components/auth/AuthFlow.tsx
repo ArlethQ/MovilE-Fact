@@ -794,7 +794,11 @@ export function AppContent({ BusinessHome }: { BusinessHome: ComponentType<Busin
   };
 
   useEffect(() => {
-    setAuthFailureHandler(() => resetLocalSession(false));
+    setAuthFailureHandler(() => {
+      Alert.alert('Sesión iniciada en otro dispositivo', 'Tu sesión se cerró porque se inició en otro dispositivo.', [
+        { text: 'Aceptar', onPress: () => resetLocalSession(false) },
+      ]);
+    });
     return () => setAuthFailureHandler(null);
   }, [currentUser]);
 
@@ -869,6 +873,49 @@ export function AppContent({ BusinessHome }: { BusinessHome: ComponentType<Busin
     }
   };
 
+  const applyLoginResponse = async (response: any, username: string, password: string, recordarme: boolean) => {
+    await delay(350);
+
+    if (isBackofficeOnlyUser(response)) {
+      clearAuthSession();
+      setMessage({ type: 'error', text: BACKOFFICE_UNAVAILABLE_MESSAGE });
+      return;
+    }
+
+    if (response.requierePoliticas) {
+      setPrivacyPendingLogin({ idUsuario: response.idUsuario ?? 0, username, password, recordarme });
+      setPrivacyAccepted(false);
+      setPrivacyMessage(null);
+      return;
+    }
+
+    if (response.requiereCambioClave && response.idUsuario) {
+      setChangeForm((current) => ({ ...current, idUsuario: response.idUsuario ?? 0 }));
+      setMode('change');
+      setMessage({ type: 'info', text: 'Ingresa el codigo de acceso o clave temporal para crear una nueva clave.' });
+      return;
+    }
+
+    if (biometricLabel && !biometricCredentials) {
+      setBiometricPendingLogin({ response, credentials: { username, password } });
+    } else if (recordarme && biometricLabel) {
+      await SecureStore.setItemAsync(BIOMETRIC_CREDENTIALS_KEY, JSON.stringify({ username, password }));
+      setBiometricCredentials({ username, password });
+    } else if (!recordarme) {
+      await SecureStore.deleteItemAsync(BIOMETRIC_CREDENTIALS_KEY);
+      setBiometricCredentials(null);
+    }
+
+    if (biometricLabel && !biometricCredentials) return;
+    setCurrentUser(response);
+  };
+
+  const isSessionConflictError = (error: unknown) => {
+    if (!(error instanceof ApiError)) return false;
+    if (error.status === 409) return true;
+    return /sesi[oó]n.*dispositivo|dispositivo.*sesi[oó]n|otro dispositivo|sesion activa/i.test(error.message);
+  };
+
   const submitLogin = () =>
     runRequest(async () => {
       const validation = validateLogin(username, password);
@@ -880,41 +927,43 @@ export function AppContent({ BusinessHome }: { BusinessHome: ComponentType<Busin
       setAuthenticating(true);
 
       try {
-        const response = await login({ username, password, recordarme });
-        await delay(350);
-
-        if (isBackofficeOnlyUser(response)) {
-          clearAuthSession();
-          setMessage({ type: 'error', text: BACKOFFICE_UNAVAILABLE_MESSAGE });
-          return;
+        let response;
+        try {
+          response = await login({ username, password, recordarme });
+        } catch (error) {
+          if (isSessionConflictError(error)) {
+            Alert.alert(
+              'Sesión iniciada en otro dispositivo',
+              error instanceof ApiError ? error.message : 'Esta cuenta ya tiene una sesión activa en otro dispositivo.',
+              [
+                { text: 'Cancelar', style: 'cancel' },
+                {
+                  text: 'Entrar',
+                  onPress: () =>
+                    runRequest(async () => {
+                      setAuthenticating(true);
+                      try {
+                        const forcedResponse = await login({ username, password, recordarme, forzar: true });
+                        await applyLoginResponse(forcedResponse, username, password, recordarme);
+                      } catch (forcedError) {
+                        const text = forcedError instanceof ApiError ? forcedError.message : 'No se pudo completar la solicitud. Intenta nuevamente.';
+                        setMessage({ type: 'error', text });
+                      } finally {
+                        setAuthenticating(false);
+                      }
+                    }),
+                },
+              ],
+            );
+            return;
+          }
+          throw error;
         }
 
-        if (response.requierePoliticas) {
-          setPrivacyPendingLogin({ idUsuario: response.idUsuario ?? 0, username, password, recordarme });
-          setPrivacyAccepted(false);
-          setPrivacyMessage(null);
-          return;
-        }
-
-        if (response.requiereCambioClave && response.idUsuario) {
-          setChangeForm((current) => ({ ...current, idUsuario: response.idUsuario ?? 0 }));
-          setMode('change');
-          setMessage({ type: 'info', text: 'Ingresa el codigo de acceso o clave temporal para crear una nueva clave.' });
-          return;
-        }
-
-        if (biometricLabel && !biometricCredentials) {
-          setBiometricPendingLogin({ response, credentials: { username, password } });
-        } else if (recordarme && biometricLabel) {
-          await SecureStore.setItemAsync(BIOMETRIC_CREDENTIALS_KEY, JSON.stringify({ username, password }));
-          setBiometricCredentials({ username, password });
-        } else if (!recordarme) {
-          await SecureStore.deleteItemAsync(BIOMETRIC_CREDENTIALS_KEY);
-          setBiometricCredentials(null);
-        }
-
-        if (biometricLabel && !biometricCredentials) return;
-        setCurrentUser(response);
+        await applyLoginResponse(response, username, password, recordarme);
+      } catch (error) {
+        const text = error instanceof ApiError ? error.message : 'No se pudo completar la solicitud. Intenta nuevamente.';
+        setMessage({ type: 'error', text });
       } finally {
         setAuthenticating(false);
       }

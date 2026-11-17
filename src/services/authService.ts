@@ -18,6 +18,7 @@ export function login(request: LoginRequest) {
       username: request.username.trim(),
       password: request.password.trim(),
       recordarme: request.recordarme,
+      forzar: request.forzar === true,
     }),
   });
 }

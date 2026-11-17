@@ -52,7 +52,7 @@ export function getFirmaSummary(emisores: Emisor[], estados: Record<number, Firm
   return {
     active,
     label: active ? 'Activa' : hasInvalidState ? estado?.estadoVigencia === 'CADUCADA' ? 'Caducada' : 'No válida' : 'Pendiente',
-    caption: hasInvalidState && estado?.mensaje ? estado.mensaje : estado?.fechaExpiracion ? `Vence: ${formatDocumentDate(estado.fechaExpiracion)}` : fallback ? 'Certificado configurado' : 'Sin firma',
+    caption: hasInvalidState && estado?.mensaje ? estado.mensaje : estado?.fechaExpiracion ? `Vence: ${formatDocumentDate(estado.fechaExpiracion)}` : estado?.diasRestantes !== null && estado?.diasRestantes !== undefined ? `Vigencia: ${estado.diasRestantes} días` : fallback ? 'Certificado configurado' : 'Sin firma',
     tone,
   };
 }
@@ -785,7 +785,7 @@ export function BusinessHomeLayout({ context }: { context: BusinessHomeLayoutCon
             voiceOnly={activeView !== 'bot'}
             embedded={activeView === 'bot'}
             viewKey={activeView}
-            bottomInset={activeView === 'bot' ? BOTTOM_NAV_CONTENT_INSET + insets.bottom : 0}
+            bottomInset={activeView === 'bot' ? 51.5 + insets.bottom : 0}
             userName={portalFirstName}
             userId={userId}
             reduceMotion={reduceMotion}

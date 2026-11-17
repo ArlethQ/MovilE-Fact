@@ -4,6 +4,7 @@ export type LoginRequest = {
   username: string;
   password: string;
   recordarme: boolean;
+  forzar?: boolean;
 };
 
 export type LoginResponse = {
