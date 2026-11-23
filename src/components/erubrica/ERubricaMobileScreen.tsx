@@ -1,4 +1,4 @@
-import * as DocumentPicker from 'expo-document-picker';
+import type * as DocumentPicker from 'expo-document-picker';
 import { File, Paths } from 'expo-file-system';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as ImagePicker from 'expo-image-picker';
@@ -24,6 +24,7 @@ import {
 import { WebView } from 'react-native-webview';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { API_BASE_URL } from '../../config/api';
+import { TRANSFER_DESTINATION_DETAILS, TRANSFER_ORIGIN_BANKS } from '../../config/bankTransfer';
 import { ApiError, getAuthSessionCookie } from '../../services/apiClient';
 import { ERubricaDashboard, ERubricaDocumentoFirmado, ERubricaDocumentoPendiente, ERubricaEmisor, ERubricaFirmaEstado, ERubricaSolicitudBorrador, appendERubricaFile, buscarERubricaSolicitudesProveedor, cargarERubricaDocumentoPendiente, configurarERubricaFirma, crearERubricaSolicitud, descargarERubricaDocumentoPendiente, descargarERubricaFirmaP12, eliminarERubricaDocumentoPendiente, eliminarERubricaSolicitudBorrador, enviarTransferenciaERubricaSolicitud, firmarERubricaDocumento, getERubricaDocumentosFirmados, getERubricaDocumentosPendientes, getERubricaEmisores, getERubricaFirmaEstado, getERubricaPlan, getERubricaProductos, getERubricaRenovacion, getERubricaSaldo, getERubricaSolicitudBorradores, guardarERubricaSolicitudBorrador, iniciarPagoERubricaSolicitud, sincronizarERubricaSolicitud, validarERubricaFirmaPdf, validarERubricaFirmaTemporal, validarERubricaQr } from '../../services/erubricaMobileService';
 import { EFACT_THEME, ERUBRICA_COLORS } from '../../styles/theme';
@@ -31,6 +32,7 @@ import { formatDocumentDate } from '../../utils/documentFormatting';
 import { buildSignatureConfirmation } from '../../utils/signatureConfirmation';
 import { buildPdfViewerHtml, restorePdfSignaturePlacements, SIGNATURE_STAMP_SIZE_MM, type PdfSignaturePlacement, type PdfSignaturePosition } from '../../utils/pdfSignature';
 import { pickReadablePdf, readPdfBase64 } from '../../utils/pdfFileAccess';
+import { pickReadableDocument } from '../../utils/readableDocument';
 import { buildDeviceFileName } from '../../utils/fileUtils';
 import { validateEmail, validateIdentificacion } from '../../utils/authValidation';
 import { EmptyState } from '../ui/FeedbackStates';
@@ -47,14 +49,6 @@ type MessageState = {
   type: 'success' | 'error' | 'info';
   text: string;
 } | null;
-
-type ERubricaSolicitudPrefill = {
-  nombres?: string;
-  apellidos?: string;
-  identificacion?: string;
-  correo?: string;
-  celular?: string;
-};
 
 function getDocumentAssetUrl(response: { url?: string | null } | string) {
   const value = typeof response === 'string' ? response : response.url;
@@ -356,7 +350,6 @@ export function ERubricaMobileScreen({
   voiceControlsRef,
   userName,
   userId,
-  solicitudPrefill,
 }: {
   data: ERubricaDashboard | null;
   puedeFirmarSinPlan: boolean;
@@ -375,7 +368,6 @@ export function ERubricaMobileScreen({
   voiceControlsRef?: React.MutableRefObject<BotVoiceControls | null>;
   userName: string;
   userId: number;
-  solicitudPrefill?: ERubricaSolicitudPrefill;
 }) {
   const [tab, setTab] = useState<ERubricaTab>('inicio');
   const [qrInput, setQrInput] = useState('');
@@ -588,23 +580,13 @@ export function ERubricaMobileScreen({
     setTab(nextTab);
     onTabChange(nextTab);
   };
-  const buildSolicitudFormFromProfile = (persona: string) => {
-    const identificacion = solicitudPrefill?.identificacion?.replace(/\D/g, '') ?? '';
-    const apellidos = (solicitudPrefill?.apellidos ?? '').trim().split(/\s+/).filter(Boolean);
-    const isCedula = /^\d{10}$/.test(identificacion);
-    const isRuc = /^\d{13}$/.test(identificacion);
-    return {
-      ...SOLICITUD_FORM_INITIAL,
-      poseeRuc: persona !== 'Persona natural con cédula',
-      tipoDocumento: isCedula ? 'CEDULA' : '',
-      identificacion: isCedula && persona !== 'Representante legal' ? identificacion : '',
-      ruc: isRuc && persona !== 'Persona natural con cédula' ? identificacion : '',
-      nombres: (solicitudPrefill?.nombres ?? '').trim(),
-      primerApellido: apellidos[0] ?? '',
-      segundoApellido: apellidos.slice(1).join(' '),
-      celular: (solicitudPrefill?.celular ?? '').trim(),
-      correo: (solicitudPrefill?.correo ?? '').trim(),
-    };
+  const selectSolicitudPersona = (persona: string) => {
+    if (persona === solicitudPersona) return;
+
+    setSolicitudPersona(persona);
+    setSolicitudForm({ ...SOLICITUD_FORM_INITIAL, poseeRuc: persona !== 'Persona natural con cédula' });
+    setSolicitudFiles(SOLICITUD_FILES_INITIAL);
+    setSolicitudId(null);
   };
   useEffect(() => {
     if (!initialPdf) return;
@@ -701,7 +683,7 @@ export function ERubricaMobileScreen({
         primerApellido: get('SolPrimerApellido', 'solPrimerApellido'),
         segundoApellido: get('SolSegundoApellido', 'solSegundoApellido'),
         fechaNacimiento: get('SolFechaNacimiento', 'solFechaNacimiento').split('T')[0],
-        nacionalidad: get('SolNacionalidad', 'solNacionalidad') || SOLICITUD_FORM_INITIAL.nacionalidad,
+        nacionalidad: get('SolNacionalidad', 'solNacionalidad'),
         sexo: get('SolSexo', 'solSexo'),
         celular: get('SolTelefono1', 'solTelefono1'),
         telefonoSecundario: get('SolTelefono2', 'solTelefono2'),
@@ -1030,14 +1012,16 @@ export function ERubricaMobileScreen({
     setValidationPageCount(1);
   };
   const pickCertificate = async () => {
-    const result = await DocumentPicker.getDocumentAsync({ type: ['application/x-pkcs12', 'application/pkcs12', 'application/octet-stream'], copyToCacheDirectory: true });
-    if (!result.canceled) {
-      const file = result.assets[0];
-      if (!file.name.toLowerCase().endsWith('.p12') || (file.size ?? 0) > 5 * 1024 * 1024) {
-        Alert.alert('Certificado no válido', 'Selecciona un archivo .p12 de máximo 5 MB.');
-        return;
-      }
-      setCertificateFile(file);
+    try {
+      const file = await pickReadableDocument({
+        type: ['application/x-pkcs12', 'application/pkcs12', 'application/octet-stream'],
+        extensions: ['p12'],
+        maxBytes: 5 * 1024 * 1024,
+        invalidSelection: 'Selecciona un archivo .p12 de máximo 5 MB.',
+      });
+      if (file) setCertificateFile(file);
+    } catch (error) {
+      Alert.alert('No se pudo adjuntar el certificado', error instanceof Error ? error.message : 'Vuelve a seleccionar el archivo.');
     }
   };
   const signPdfDocument = async () => {
@@ -1161,12 +1145,14 @@ export function ERubricaMobileScreen({
     if (birth > new Date(today.getFullYear() - age, today.getMonth(), today.getDate())) age -= 1;
     return age;
   };
+  const requiereRuc = solicitudPersona === 'Persona natural con RUC' || solicitudPersona === 'Representante legal';
+  const vigenciaValidaParaTitular = solicitudPersona !== 'Representante legal' || !['7 días', '30 días'].includes(solicitudPlan.label);
   const solicitudDocumentoItems = [
     { key: 'cedulaFrontal' as SolicitudDocumentoKey, label: 'Documento de identificación frontal *', types: ['image/*', 'application/pdf'] },
     { key: 'cedulaPosterior' as SolicitudDocumentoKey, label: 'Documento de identificación posterior *', types: ['image/*', 'application/pdf'] },
     { key: 'selfieCedula' as SolicitudDocumentoKey, label: 'Selfie sosteniendo su documento *', types: ['image/*'] },
     ...(parseSolicitudAge() >= 65 ? [{ key: 'videoAceptacion' as SolicitudDocumentoKey, label: 'Video de aceptación *', types: ['video/*'] }] : []),
-    ...(solicitudForm.poseeRuc || solicitudPersona === 'Representante legal' ? [{ key: 'rucFile' as SolicitudDocumentoKey, label: 'Archivo RUC *', types: ['application/pdf'] }] : []),
+    ...(requiereRuc ? [{ key: 'rucFile' as SolicitudDocumentoKey, label: 'Archivo RUC *', types: ['application/pdf'] }] : []),
     ...(solicitudPersona === 'Representante legal' ? [
       { key: 'nombramiento' as SolicitudDocumentoKey, label: 'Nombramiento *', types: ['application/pdf'] },
       { key: 'constitucion' as SolicitudDocumentoKey, label: 'Constitución *', types: ['application/pdf'] },
@@ -1177,27 +1163,23 @@ export function ERubricaMobileScreen({
     { key: 'archivoAdicional' as SolicitudDocumentoKey, label: 'Documento adicional', types: ['image/*', 'application/pdf'] },
   ];
   const pickSolicitudFile = async (key: SolicitudDocumentoKey, types: string[]) => {
-    const result = await DocumentPicker.getDocumentAsync({ type: types, copyToCacheDirectory: true });
-    if (!result.canceled) {
-      const file = result.assets[0];
-      const extension = file.name.split('.').pop()?.toLowerCase() ?? '';
-      const allowedExtensions = key === 'videoAceptacion'
-        ? ['mp4', 'mov', 'avi', 'webm']
-        : key === 'selfieCedula'
-          ? ['jpg', 'jpeg', 'png']
-          : ['jpg', 'jpeg', 'png', 'pdf'];
-      const mustBePdf = ['rucFile', 'nombramiento', 'constitucion', 'autorizacion', 'aceptacionNombramiento'].includes(key);
-      const maxBytes = key === 'videoAceptacion' ? 50 * 1024 * 1024 : 10 * 1024 * 1024;
-      if (!allowedExtensions.includes(extension) || (mustBePdf && extension !== 'pdf') || (file.size ?? 0) <= 0 || (file.size ?? 0) > maxBytes) {
-        Alert.alert('Archivo no válido', key === 'videoAceptacion'
-          ? 'Selecciona un video MP4, MOV, AVI o WEBM de máximo 50 MB.'
-          : mustBePdf
-            ? 'Selecciona un PDF válido de máximo 10 MB.'
-            : 'Selecciona un archivo válido de máximo 10 MB.');
-        return;
-      }
+    const isVideo = key === 'videoAceptacion';
+    const onlyPdf = types.length === 1 && types[0] === 'application/pdf';
+    const extensions = isVideo
+      ? ['mp4', 'mov', 'avi', 'webm']
+      : onlyPdf ? ['pdf'] : key === 'selfieCedula' ? ['jpg', 'jpeg', 'png'] : ['jpg', 'jpeg', 'png', 'pdf'];
+    const invalidSelection = isVideo
+      ? 'Selecciona un video MP4, MOV, AVI o WEBM de máximo 50 MB.'
+      : `Selecciona un archivo ${extensions.join(', ').toUpperCase()} de máximo 10 MB.`;
+
+    try {
+      const file = await pickReadableDocument({ type: types, extensions, maxBytes: (isVideo ? 50 : 10) * 1024 * 1024, invalidSelection });
+      if (!file) return;
+
       setSolicitudId(null);
       setSolicitudFiles((current) => ({ ...current, [key]: file }));
+    } catch (error) {
+      Alert.alert('No se pudo adjuntar el archivo', error instanceof Error ? error.message : 'Vuelve a seleccionar el archivo.');
     }
   };
   const appendSolicitudFile = (form: FormData, key: SolicitudDocumentoKey, fieldName: string) => {
@@ -1207,12 +1189,13 @@ export function ERubricaMobileScreen({
   };
   const buildSolicitudFormData = () => {
     const form = new FormData();
+    form.append('formatoFirma', 'ARCHIVO_P12');
     form.append('vigencia', solicitudPlan.label);
     form.append('tipoPersona', solicitudPersona ?? '');
     form.append('tipoDocumento', solicitudForm.tipoDocumento);
     form.append('identificacion', solicitudForm.identificacion);
     form.append('codigoDactilar', solicitudForm.codigoDactilar);
-    form.append('poseeRuc', String(solicitudPersona === 'Representante legal' || solicitudForm.poseeRuc));
+    form.append('poseeRuc', String(requiereRuc));
     form.append('ruc', solicitudForm.ruc);
     form.append('nombres', solicitudForm.nombres);
     form.append('primerApellido', solicitudForm.primerApellido);
@@ -1293,12 +1276,20 @@ export function ERubricaMobileScreen({
       Alert.alert('No se pudo eliminar', error instanceof ApiError ? error.message : 'Intenta nuevamente.');
     }
   };
+  const validateSolicitudPlan = () => {
+    if (vigenciaValidaParaTitular) return true;
+
+    setSolicitudStep(1);
+    Alert.alert('Vigencia no válida', 'Para representante legal, selecciona una vigencia de al menos 1 año.');
+    return false;
+  };
   const validateSolicitudBeforePayment = () => {
     if (!solicitudPersona) {
       Alert.alert('Selecciona el tipo de solicitud', 'Elige Persona natural con cédula, Persona natural con RUC o Representante legal.');
       return false;
     }
-    if (!solicitudForm.tipoDocumento.trim() || !solicitudForm.identificacion.trim() || (solicitudForm.tipoDocumento === 'CEDULA' && !solicitudForm.codigoDactilar.trim()) || !solicitudForm.nombres.trim() || !solicitudForm.primerApellido.trim() || !solicitudForm.fechaNacimiento.trim() || !solicitudForm.sexo.trim() || !solicitudForm.celular.trim() || !solicitudForm.correo.trim() || !solicitudForm.provincia.trim() || !solicitudForm.canton.trim() || !solicitudForm.direccion.trim()) {
+    if (!validateSolicitudPlan()) return false;
+    if (!solicitudForm.tipoDocumento.trim() || !solicitudForm.identificacion.trim() || (solicitudForm.tipoDocumento === 'CEDULA' && !solicitudForm.codigoDactilar.trim()) || !solicitudForm.nombres.trim() || !solicitudForm.primerApellido.trim() || !solicitudForm.fechaNacimiento.trim() || !solicitudForm.sexo.trim() || !solicitudForm.nacionalidad.trim() || !solicitudForm.celular.trim() || !solicitudForm.correo.trim() || !solicitudForm.provincia.trim() || !solicitudForm.canton.trim() || !solicitudForm.direccion.trim()) {
       Alert.alert('Datos incompletos', 'Completa los datos obligatorios del solicitante.');
       return false;
     }
@@ -1331,7 +1322,7 @@ export function ERubricaMobileScreen({
       Alert.alert('Dirección no válida', 'La dirección debe tener entre 5 y 300 caracteres.');
       return false;
     }
-    if (solicitudPersona === 'Representante legal' || solicitudForm.poseeRuc) {
+    if (requiereRuc) {
       const rucValidation = validateIdentificacion('RUC', solicitudForm.ruc);
       if (!rucValidation.valid) {
         Alert.alert('RUC no válido', rucValidation.message ?? 'Ingresa un RUC válido.');
@@ -1365,8 +1356,9 @@ export function ERubricaMobileScreen({
       Alert.alert('Selecciona el titular', 'Elige el tipo de persona para continuar.');
       return;
     }
+    if (solicitudStep === 2 && !validateSolicitudPlan()) return;
     if (solicitudStep === 3) {
-      const faltanDatos = !solicitudForm.tipoDocumento || !solicitudForm.identificacion || !solicitudForm.nombres || !solicitudForm.primerApellido || !solicitudForm.fechaNacimiento || !solicitudForm.sexo || !solicitudForm.celular || !solicitudForm.correo || !solicitudForm.provincia || !solicitudForm.canton || !solicitudForm.direccion;
+      const faltanDatos = !solicitudForm.tipoDocumento || !solicitudForm.identificacion || !solicitudForm.nombres || !solicitudForm.primerApellido || !solicitudForm.fechaNacimiento || !solicitudForm.sexo || !solicitudForm.nacionalidad || !solicitudForm.celular || !solicitudForm.correo || !solicitudForm.provincia || !solicitudForm.canton || !solicitudForm.direccion;
       if (faltanDatos) {
         Alert.alert('Datos incompletos', 'Completa los datos obligatorios del solicitante antes de continuar.');
         return;
@@ -1809,7 +1801,7 @@ export function ERubricaMobileScreen({
             {['Persona natural con cédula', 'Persona natural con RUC', 'Representante legal'].map((option) => {
               const active = solicitudPersona === option;
               return (
-              <Pressable key={option} style={[styles.erubricaRequestPerson, active && styles.erubricaRequestPersonActive]} onPress={() => { setSolicitudPersona(option); setSolicitudForm(buildSolicitudFormFromProfile(option)); setSolicitudFiles(SOLICITUD_FILES_INITIAL); setSolicitudId(null); }}>
+              <Pressable key={option} style={[styles.erubricaRequestPerson, active && styles.erubricaRequestPersonActive]} onPress={() => selectSolicitudPersona(option)}>
                   <MaterialCommunityIcons name={active ? 'check-circle' : 'card-account-details-outline'} size={18} color={active ? ERUBRICA_COLORS.primary : '#607887'} />
                   <Text style={styles.erubricaRequestOptionTitle}>{option}</Text>
                 </Pressable>
@@ -1825,18 +1817,7 @@ export function ERubricaMobileScreen({
             <CompactSelect title="Tipo de documento" placeholder="Selecciona un documento" value={solicitudForm.tipoDocumento} options={[{ label: 'Cédula', value: 'CEDULA' }, { label: 'Pasaporte', value: 'PASAPORTE' }]} onValueChange={(value) => setSolicitudForm((current) => ({ ...current, tipoDocumento: value, identificacion: '', codigoDactilar: '' }))} />
             <Field label="Identificación *" value={solicitudForm.identificacion} onChangeText={(value) => setSolicitudForm((current) => ({ ...current, identificacion: value }))} />
             {solicitudForm.tipoDocumento === 'CEDULA' ? <Field label="Código dactilar *" value={solicitudForm.codigoDactilar} onChangeText={(value) => setSolicitudForm((current) => ({ ...current, codigoDactilar: value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 10) }))} autoCapitalize="characters" /> : null}
-            {solicitudPersona !== 'Persona natural con cédula' ? <>
-            <Text style={styles.clientDetailLabel}>¿Posee RUC? *</Text>
-            <View style={styles.erubricaPendingActionRow}>
-              <Pressable style={[styles.erubricaRequestPerson, (solicitudPersona === 'Representante legal' || solicitudForm.poseeRuc) && styles.erubricaRequestPersonActive]} onPress={() => setSolicitudForm((current) => ({ ...current, poseeRuc: true }))}>
-                <MaterialCommunityIcons name={(solicitudPersona === 'Representante legal' || solicitudForm.poseeRuc) ? 'check-circle' : 'circle-outline'} size={18} color={ERUBRICA_COLORS.primary} /><Text style={styles.erubricaRequestOptionTitle}>Sí</Text>
-              </Pressable>
-              <Pressable disabled style={[styles.erubricaRequestPerson, !(solicitudPersona === 'Representante legal' || solicitudForm.poseeRuc) && styles.erubricaRequestPersonActive]}>
-                <MaterialCommunityIcons name={!(solicitudPersona === 'Representante legal' || solicitudForm.poseeRuc) ? 'check-circle' : 'circle-outline'} size={18} color={ERUBRICA_COLORS.primary} /><Text style={styles.erubricaRequestOptionTitle}>No</Text>
-              </Pressable>
-            </View>
-            <Field label="RUC *" value={solicitudForm.ruc} onChangeText={(value) => setSolicitudForm((current) => ({ ...current, ruc: value.replace(/\D/g, '') }))} keyboardType="number-pad" />
-            </> : null}
+            {requiereRuc ? <Field label="RUC *" value={solicitudForm.ruc} onChangeText={(value) => setSolicitudForm((current) => ({ ...current, ruc: value.replace(/\D/g, '') }))} keyboardType="number-pad" /> : null}
             <Field label="Nombres *" value={solicitudForm.nombres} onChangeText={(value) => setSolicitudForm((current) => ({ ...current, nombres: value }))} />
             <Field label="Primer apellido *" value={solicitudForm.primerApellido} onChangeText={(value) => setSolicitudForm((current) => ({ ...current, primerApellido: value }))} />
             <Field label="Segundo apellido (opcional)" value={solicitudForm.segundoApellido} onChangeText={(value) => setSolicitudForm((current) => ({ ...current, segundoApellido: value }))} />
@@ -1864,7 +1845,7 @@ export function ERubricaMobileScreen({
                 <Text style={styles.erubricaHistoryEyebrow}>DATOS DE LA EMPRESA</Text>
                 <Text style={styles.erubricaSignStep}>Información corporativa</Text>
                 <Field label="Razón social de la empresa *" value={solicitudForm.razonSocialEmpresa} onChangeText={(value) => setSolicitudForm((current) => ({ ...current, razonSocialEmpresa: value }))} />
-            <Field label="Departamento (opcional)" value={solicitudForm.departamento} onChangeText={(value) => setSolicitudForm((current) => ({ ...current, departamento: value }))} />
+            <Field label="Departamento *" value={solicitudForm.departamento} onChangeText={(value) => setSolicitudForm((current) => ({ ...current, departamento: value }))} />
                 <Field label="Cargo *" value={solicitudForm.cargo} onChangeText={(value) => setSolicitudForm((current) => ({ ...current, cargo: value }))} />
                 <Field label="Motivo de firma *" value={solicitudForm.motivoFirma} onChangeText={(value) => setSolicitudForm((current) => ({ ...current, motivoFirma: value }))} />
               </View>
@@ -2568,7 +2549,7 @@ export function ERubricaMobileScreen({
                   <Text style={styles.erubricaPaymentTitle}>Información de pago</Text>
                   <Text style={styles.clientFilterLabel}>Banco *</Text>
                   <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.clientFilterRow}>
-                    {['Banco Pichincha', 'Banco Guayaquil', 'Banco Internacional', 'Banco Pacifico', 'Banco Produbanco', 'Banco Bolivariano', 'Cooperativa JEP', 'Otra institucion'].map((banco) => (
+                    {TRANSFER_ORIGIN_BANKS.map((banco) => (
                       <Pressable key={banco} style={[styles.clientFilterChip, transferForm.banco === banco && styles.clientFilterChipActive]} onPress={() => setTransferForm((current) => ({ ...current, banco }))}><Text style={[styles.clientFilterChipText, transferForm.banco === banco && styles.clientFilterChipTextActive]}>{banco}</Text></Pressable>
                     ))}
                   </ScrollView>
@@ -2586,7 +2567,7 @@ export function ERubricaMobileScreen({
                   <Text style={styles.erubricaRequestOptionTitle}>Total a pagar</Text>
                   <Text style={styles.erubricaPaymentBankText}>Subtotal USD {solicitudSubtotal.toFixed(2)}{`\n`}IVA 15% USD {solicitudIva.toFixed(2)}{`\n`}Total USD {solicitudTotal.toFixed(2)}</Text>
                   <Text style={styles.erubricaRequestOptionTitle}>Pagar a</Text>
-                  <Text style={styles.erubricaPaymentBankText}>Banco: Banco Pichincha{`\n`}Tipo de cuenta: Cuenta corriente{`\n`}Número de cuenta: 2100346647{`\n`}RUC: 1793233799001{`\n`}Nombre: NUMERICASOFTWARE S.A.S.{`\n`}e-mail: contabilidad@numericasoftware.com</Text>
+                  <Text style={styles.erubricaPaymentBankText}>{TRANSFER_DESTINATION_DETAILS}</Text>
                 </View>
               </View>
             ) : null}

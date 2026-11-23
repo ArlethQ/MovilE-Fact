@@ -8,6 +8,7 @@ import { Field, MessageBox, PrimaryButton, SearchField, SecondaryButton } from '
 import { EmptyState } from '../ui/FeedbackStates';
 import { ResultCollection } from '../data/ResultCollection';
 import { formatMoney } from '../../utils/documentFormatting';
+import { PurchaseDocumentsPaymentModal } from './PurchaseDocumentsPaymentModal';
 import { styles } from '../../styles/appStyles';
 
 export type OperationalFormMode = 'create' | 'edit' | null;
@@ -772,11 +773,13 @@ export function PurchaseDocumentsScreen({
   message?: MessageState;
   onChange: (field: 'codigo' | 'valor', value: string) => void;
   onSelectPlan: (documents: number, amount: number, unlimited: boolean) => void;
-  onSave: () => void;
+  onSave: ComponentProps<typeof PurchaseDocumentsPaymentModal>['onSave'];
 }) {
-  const documents = Number(form.codigo) || 0;
-  const amount = Number(form.valor.replace(',', '.')) || 0;
+  const documents = Number(form.codigo);
+  const amount = Number(form.valor.replace(',', '.'));
+  const unlimited = form.descripcion.toLowerCase().includes('ilimit');
   const [localMessage, setLocalMessage] = useState<MessageState>(null);
+  const [paymentOpen, setPaymentOpen] = useState(false);
   const plans = [
     { documents: 25, amount: 11.5, caption: 'Una recarga simple para comenzar.', color: '#EAF5FC' },
     { documents: 120, amount: 31.74, caption: 'Equilibrio ideal para tu operación diaria.', color: '#FFF6E5', recommended: true },
@@ -788,7 +791,10 @@ export function PurchaseDocumentsScreen({
     setLocalMessage(null);
   };
   const confirm = () => {
-    const unlimited = form.descripcion.toLowerCase().includes('ilimit');
+    if (!Number.isInteger(documents) || !/^\d+(?:[,.]\d{1,2})?$/.test(form.valor.trim()) || !Number.isFinite(amount)) {
+      setLocalMessage({ type: 'info', text: 'Verifica la cantidad y el valor de la recarga. Usa máximo dos decimales.' });
+      return;
+    }
     if ((!unlimited && documents < 11) || amount < 5) {
       setLocalMessage({ type: 'info', text: 'Ingresa al menos 11 documentos y un monto mínimo de $5,00.' });
       return;
@@ -797,15 +803,10 @@ export function PurchaseDocumentsScreen({
       setLocalMessage({ type: 'info', text: 'El monto máximo permitido para una recarga es de $1.000,00.' });
       return;
     }
-    if (!Number.isFinite(documents) || !Number.isFinite(amount)) {
-      setLocalMessage({ type: 'info', text: 'Verifica que la cantidad y el valor sean números válidos.' });
-      return;
-    }
     setLocalMessage(null);
-    onSave();
+    setPaymentOpen(true);
   };
-  const total = amount;
-  const unlimited = form.descripcion.toLowerCase().includes('ilimit');
+  const total = amount || 0;
   const selectedPlanKey = unlimited ? 'unlimited' : `${documents}:${amount}`;
 
   return (
@@ -862,11 +863,11 @@ export function PurchaseDocumentsScreen({
         <View style={styles.rechargeSummaryRow}><Text style={styles.rechargeSummaryLabel}>Documentos</Text><Text style={styles.rechargeSummaryValue}>{unlimited ? 'Ilimitados' : documents || 0}</Text></View>
         <View style={styles.rechargeSummaryRow}><Text style={styles.rechargeSummaryLabel}>Vigencia</Text><Text style={styles.rechargeSummaryValue}>{unlimited ? '1 año' : 'Saldo disponible'}</Text></View>
         {localMessage ? <MessageBox message={localMessage} /> : null}
-        {message ? <MessageBox message={message} /> : null}
+        {!paymentOpen && message ? <MessageBox message={message} /> : null}
         <PrimaryButton label="Confirmar recarga" loading={saving} onPress={confirm} />
         <View style={styles.rechargeSecureRow}>
           <MaterialCommunityIcons name="lock-check-outline" size={17} color="#7890A4" />
-          <Text style={styles.rechargeSecure}>Pago 100% seguro{`\n`}El saldo se acredita automáticamente al aprobarse el pago.</Text>
+          <Text style={styles.rechargeSecure}>El saldo se acredita cuando se aprueba el pago.</Text>
         </View>
       </View>
 
@@ -901,6 +902,17 @@ export function PurchaseDocumentsScreen({
         ))}
       </ScrollView>
 
+      {paymentOpen ? (
+        <PurchaseDocumentsPaymentModal
+          documents={documents}
+          unlimited={unlimited}
+          total={total}
+          saving={saving}
+          message={message}
+          onSave={onSave}
+          onClose={() => setPaymentOpen(false)}
+        />
+      ) : null}
     </View>
   );
 }

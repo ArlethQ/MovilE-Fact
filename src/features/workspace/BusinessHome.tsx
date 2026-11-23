@@ -48,7 +48,7 @@ import { anularNotaCredito, buscarNotaCreditoFacturas, emitirNotaCredito, emitir
 import { anularNotaDebito, buscarNotaDebitoFacturas, emitirNotaDebito, enviarNotaDebitoCorreo, getNotaDebitoPdf, getNotaDebitoPreparacion, getNotasDebito, getNotaDebitoXml, guardarNotaDebito, NotaDebitoListItem } from '../../services/notasDebitoMobileService';
 import { dismissNotifications, getNotificaciones, NotificacionItem } from '../../services/notificacionesService';
 import { syncDeviceNotifications } from '../../services/deviceNotificationsService';
-import { CompraDocumentosEstado, CompraDocumentosTransferenciaInput, createOperationalItem, deleteOperationalItem, getCompraDocumentosEstado, getEstadoCuentaDetalle, getEstadoCuentaExcel, getEstadoCuentaListadoExcel, getEstadoCuentaPdf, getOperationalMobileModule, iniciarPagoCompraDocumentos, OperationalMobileItem, OperationalModule, registrarTransferenciaCompraDocumentos, updateOperationalItem } from '../../services/operationalMobileService';
+import { CompraDocumentosEstado, CompraDocumentosPagoInput, CompraDocumentosTransferenciaInput, createOperationalItem, deleteOperationalItem, getCompraDocumentosEstado, getEstadoCuentaDetalle, getEstadoCuentaExcel, getEstadoCuentaListadoExcel, getEstadoCuentaPdf, getOperationalMobileModule, iniciarPagoCompraDocumentos, OperationalMobileItem, OperationalModule, registrarTransferenciaCompraDocumentos, updateOperationalItem } from '../../services/operationalMobileService';
 import { getPerfil, updatePerfil, uploadPerfilAvatar } from '../../services/perfilService';
 import { createPuntoEmision, deletePuntoEmision, getPuntoEmisionSiguienteSecuencial, getPuntosEmision, markPuntoPrincipal, PuntoDocumentoKey, savePuntoEmisionSecuenciaInicial, updatePuntoEmision } from '../../services/puntosEmisionService';
 import { createProducto, deleteProducto, getProducto, getProductoLookups, getProductos, getProductoSubcategorias, updateProducto } from '../../services/productosService';
@@ -2620,7 +2620,7 @@ export function BusinessHome({ currentUser, incomingPdfUri, onIncomingPdfHandled
     return { module, tab };
   };
 
-  const saveOperational = async () => {
+  const saveOperational = async (transfer?: Omit<CompraDocumentosTransferenciaInput, keyof CompraDocumentosPagoInput>) => {
     const context = getCurrentOperationalContext();
     if (!context) return;
 
@@ -2653,7 +2653,12 @@ export function BusinessHome({ currentUser, incomingPdfUri, onIncomingPdfHandled
       }
     }
 
-    if (context.module === 'recargas' && context.tab === 'Comprar documentos') {
+    const buyingDocuments = context.module === 'recargas' && context.tab === 'Comprar documentos';
+    if (buyingDocuments) {
+      if (!catalogUserId) {
+        setDirectoryMessage({ type: 'error', text: 'No se pudo identificar al usuario de la recarga.' });
+        return;
+      }
       const documentos = Number(operationalForm.codigo);
       const monto = Number(operationalForm.valor.replace(',', '.'));
       if (!Number.isInteger(documentos) || documentos < 0 || !Number.isFinite(monto) || monto <= 0) {
@@ -2666,19 +2671,28 @@ export function BusinessHome({ currentUser, incomingPdfUri, onIncomingPdfHandled
     setDirectoryMessage(null);
 
     try {
-      const payload = operationalFormToPayloadForContext(context.module, context.tab, operationalForm);
-      if (context.module === 'recargas' && context.tab === 'Comprar documentos' && catalogUserId) {
-        const payment = await iniciarPagoCompraDocumentos(catalogUserId, {
-          documentos: Number(operationalForm.codigo.trim()) || 0,
-          montoTotal: Number(operationalForm.valor.replace(',', '.')) || 0,
+      if (buyingDocuments && catalogUserId) {
+        const purchase: CompraDocumentosPagoInput = {
+          documentos: Number(operationalForm.codigo),
+          montoTotal: Number(operationalForm.valor.replace(',', '.')),
           descripcion: operationalForm.descripcion.trim() || 'Recarga personalizada',
           emailDestino: operationalForm.observacion.trim() || null,
           esIlimitado: operationalForm.descripcion.toLowerCase().includes('ilimit'),
-        });
-        await Linking.openURL(payment.paymentUrl);
-        setDirectoryMessage({ type: 'success', text: 'Checkout de Pagomedios abierto. La recarga se acreditara al aprobar el pago.' });
-        return;
+        };
+
+        if (transfer) {
+          await registrarTransferenciaCompraDocumentos(catalogUserId, { ...purchase, ...transfer });
+          setDirectoryMessage({ type: 'success', text: 'Transferencia registrada. Consulta su estado en Mis recargas. La validación puede tomar hasta 24 horas.' });
+          setReloadKey((value) => value + 1);
+        } else {
+          const payment = await iniciarPagoCompraDocumentos(catalogUserId, purchase);
+          await Linking.openURL(payment.paymentUrl);
+          setDirectoryMessage({ type: 'success', text: 'Checkout de Pagomedios abierto. La recarga se acreditará al aprobarse el pago.' });
+        }
+        return true;
       }
+
+      const payload = operationalFormToPayloadForContext(context.module, context.tab, operationalForm);
       if (operationalFormMode === 'edit' && selectedOperationalItem?.id) {
         await updateOperationalItem(context.module, context.tab, selectedOperationalItem.id, payload, { userId: catalogUserId });
       } else {
@@ -2689,7 +2703,15 @@ export function BusinessHome({ currentUser, incomingPdfUri, onIncomingPdfHandled
       closeOperationalForm();
       setReloadKey((value) => value + 1);
     } catch (error) {
-      const text = error instanceof ApiError ? error.message : 'No se pudo guardar el registro.';
+      if (buyingDocuments && transfer && error instanceof ApiError && error.status === 0) {
+        setDirectoryMessage({
+          type: 'error',
+          text: 'No se pudo confirmar el envío. Revisa Mis recargas antes de volver a enviar el comprobante.',
+        });
+        return;
+      }
+      const fallback = buyingDocuments ? 'No se pudo procesar el pago.' : 'No se pudo guardar el registro.';
+      const text = error instanceof ApiError ? error.message : fallback;
       setDirectoryMessage({ type: 'error', text });
     } finally {
       setSavingOperational(false);

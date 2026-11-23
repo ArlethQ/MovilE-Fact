@@ -103,7 +103,7 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
   const body = contentType.includes('application/json') && text ? safeParseJson(text) : text;
 
   if (!response.ok) {
-    const message = getErrorMessage(response.status, body, path);
+    const message = getApiErrorMessage(response.status, body, path);
     const error = new ApiError(response.status, message);
     if (response.status === 401) {
       clearAuthSession();
@@ -160,7 +160,7 @@ export async function apiRequestBinary(path: string, options: RequestOptions = {
     } finally {
       clearTimeout(timeout);
     }
-    const message = getErrorMessage(response.status, text, path);
+    const message = getApiErrorMessage(response.status, text, path);
     const error = new ApiError(response.status, message);
     if (response.status === 401 && !path.startsWith('/api/auth/')) authFailureHandler?.(error);
     if (!suppressErrorLog) {
@@ -195,7 +195,7 @@ function safeParseJson(text: string) {
   }
 }
 
-function getErrorMessage(status: number, body: unknown, path: string) {
+export function getApiErrorMessage(status: number, body: unknown, path: string) {
   const bodyMessage = getBodyErrorMessage(body);
   const normalizedPath = path.toLowerCase().replace(/\/+$/, '');
 

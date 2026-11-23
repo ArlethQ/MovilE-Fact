@@ -108,6 +108,62 @@ function loginFlow(client) {
   return { authenticate, alert, applied, authenticationStates };
 }
 
+test('Un rechazo dentro de HTTP 200 no se interpreta como sesión iniciada', async () => {
+  for (const body of [
+    { success: false, message: 'Credenciales inválidas' },
+    { success: false, mensaje: 'Credenciales inválidas' },
+    { success: false, message: 'System.Exception: información interna' },
+  ]) {
+    const client = createClient(async () => json(body));
+    const flow = loginFlow(client);
+    await assert.rejects(flow.authenticate(credentials), error => error.status === 400 && !/System\.Exception/.test(error.message));
+    assert.equal(flow.applied.length, 0);
+  }
+  for (const requirement of ['requierePoliticas', 'requiereCambioClave']) {
+    const client = createClient(async () => json({ success: false, [requirement]: true, idUsuario: 7 }));
+    assert.equal((await client.login(credentials))[requirement], true);
+  }
+});
+
+test('El conflicto con HTTP 200 también requiere confirmación y admite cancelar', async () => {
+  let requests = 0;
+  const client = createClient(async () => {
+    requests++;
+    return json({ success: false, mensaje: 'Sesión abierta en otro dispositivo' });
+  });
+  const flow = loginFlow(client);
+  const pending = flow.authenticate(credentials);
+  const [, , buttons] = await flow.alert;
+  assert.equal(requests, 1);
+  buttons.find(button => button.style === 'cancel').onPress();
+  await pending;
+  assert.equal(requests, 1);
+  assert.equal(flow.applied.length, 0);
+});
+
+test('El acceso con contraseña detecta otra sesión sin biometría y con ambos valores de Recordarme', async () => {
+  for (const recordarme of [false, true]) {
+    const server = sessionServer();
+    const previous = createClient(server.fetch);
+    await previous.login({ ...credentials, recordarme });
+    const client = createClient(server.fetch);
+    const flow = loginFlow(client);
+    const submitLogin = loadAction('submitLogin', {
+      ...credentials, recordarme, validateLogin: () => ({ valid: true }),
+      runRequest: async action => action(), authenticate: flow.authenticate,
+    });
+    const pending = submitLogin();
+    const [title, , buttons] = await flow.alert;
+    assert.match(title, /Sesión abierta/);
+    assert.equal(flow.applied.length, 0);
+    buttons.find(button => button.style !== 'cancel').onPress();
+    await pending;
+    assert.equal(flow.applied.length, 1);
+    assert.equal(JSON.parse(server.requests.at(-1).options.body).recordarme, recordarme);
+    await assert.rejects(previous.checkAuth(), error => error.status === 401);
+  }
+});
+
 test('Cancelar o descartar el aviso conserva la sesión anterior y no inicia otra', async () => {
   for (const dismiss of [false, true]) {
     const server = sessionServer();

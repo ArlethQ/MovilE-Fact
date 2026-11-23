@@ -21,6 +21,8 @@ export type LoginResponse = {
     bearerToken?: string;
   };
   success?: boolean;
+  message?: string;
+  mensaje?: string;
   requierePoliticas?: boolean;
   requiereCambioClave?: boolean;
   idUsuario?: number;

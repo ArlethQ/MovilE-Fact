@@ -1,4 +1,4 @@
-import { apiRequest } from './apiClient';
+import { ApiError, apiRequest, getApiErrorMessage } from './apiClient';
 import {
   AuthCheckResponse,
   ChangePasswordRequest,
@@ -11,8 +11,8 @@ import {
   RegisterResponse,
 } from '../types/auth';
 
-export function login(request: LoginRequest) {
-  return apiRequest<LoginResponse>('/api/auth/login', {
+export async function login(request: LoginRequest) {
+  const response = await apiRequest<LoginResponse>('/api/auth/login', {
     method: 'POST',
     body: JSON.stringify({
       username: request.username.trim(),
@@ -21,6 +21,10 @@ export function login(request: LoginRequest) {
       forzar: request.forzar === true,
     }),
   });
+  if (response.success === false && !response.requierePoliticas && !response.requiereCambioClave) {
+    throw new ApiError(400, getApiErrorMessage(400, response, '/api/auth/login'));
+  }
+  return response;
 }
 
 export function checkAuth() {
