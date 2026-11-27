@@ -183,6 +183,7 @@ async function selectPdfDocument() {
 
 export function PdfDocumentPreview({
   uri,
+  reader = false,
   selectable = false,
   page = 1,
   position = { x: 0.68, y: 0.82 },
@@ -194,6 +195,7 @@ export function PdfDocumentPreview({
   onDragChange,
 }: {
   uri: string;
+  reader?: boolean;
   selectable?: boolean;
   page?: number;
   position?: { x: number; y: number };
@@ -207,6 +209,9 @@ export function PdfDocumentPreview({
   const [base64, setBase64] = useState<string | null>(null);
   const [pdfReadError, setPdfReadError] = useState<string | null>(null);
   const [renderedHeight, setRenderedHeight] = useState(420);
+  const [readerPage, setReaderPage] = useState(1);
+  const [readerPageCount, setReaderPageCount] = useState(0);
+  const displayedPage = reader ? readerPage : page;
   const pdfWebViewRef = useRef<WebView>(null);
   const pdfJsViewerSource = usePdfJsSource(PDFJS_VIEWER_URI);
   const pdfJsWorkerSource = usePdfJsSource(PDFJS_WORKER_URI);
@@ -229,13 +234,13 @@ export function PdfDocumentPreview({
 
   const html = React.useMemo(() => {
     if (base64 && pdfJsSource && pdfJsWorkerSource) {
-      return buildPdfViewerHtml({ base64, pdfJsSource, workerSource: pdfJsWorkerSource, page, selectable });
+      return buildPdfViewerHtml({ base64, pdfJsSource, workerSource: pdfJsWorkerSource, page: displayedPage, selectable });
     }
-    const message = base64 === ''
+    const message = pdfReadError ? 'No se pudo leer el archivo PDF.' : base64 === ''
       ? 'El archivo descargado no es un PDF válido.'
       : pdfJsUnavailable ? 'No se pudo iniciar el visor de PDF.' : 'Cargando PDF…';
     return `<p style="padding:24px;text-align:center;font-family:Arial;color:#637587">${message}</p>`;
-  }, [base64, page, pdfJsSource, pdfJsUnavailable, pdfJsWorkerSource, selectable]);
+  }, [base64, displayedPage, pdfReadError, pdfJsSource, pdfJsUnavailable, pdfJsWorkerSource, selectable]);
   const visibleMarkers = placements.map((placement, index) => ({ ...placement, index })).filter((placement) => placement.page === page);
   const syncMarkers = () => pdfWebViewRef.current?.injectJavaScript(`window.syncMarkers&&window.syncMarkers(${JSON.stringify(visibleMarkers)});true;`);
   useEffect(syncMarkers, [placements, page]);
@@ -244,7 +249,7 @@ export function PdfDocumentPreview({
     originWhitelist={['*']}
     source={React.useMemo(() => ({ html }), [html])}
     javaScriptEnabled
-    style={[styles.pdfDocumentWebView, { height: renderedHeight }]}
+    style={[styles.pdfDocumentWebView, reader ? styles.pdfReaderViewport : { height: renderedHeight }]}
     onMessage={(event) => {
       let result: { type?: string; dragging?: boolean; index?: number; x?: number; y?: number; xMm?: number; yMm?: number; height?: number; pageCount?: number; message?: string };
       try { result = JSON.parse(event.nativeEvent.data); } catch { return; }
@@ -261,10 +266,19 @@ export function PdfDocumentPreview({
         if (result.type === 'move' && typeof result.index === 'number') onPlacementMove?.(result.index, position);
       }
       if (result.type === 'placementError' && typeof result.message === 'string') Alert.alert('Ubicación no disponible', result.message);
-      if (result.type === 'height' && typeof result.height === 'number') setRenderedHeight(Math.max(240, Math.min(820, result.height)));
-      if (result.type === 'pageCount' && typeof result.pageCount === 'number') onPageCountChange?.(result.pageCount);
+      if (!reader && result.type === 'height' && typeof result.height === 'number') setRenderedHeight(Math.max(240, Math.min(820, result.height)));
+      if (result.type === 'pageCount' && typeof result.pageCount === 'number') {
+        if (reader) setReaderPageCount(result.pageCount);
+        onPageCountChange?.(result.pageCount);
+      }
     }}
   />;
+  if (reader) return (
+    <View style={styles.pdfReaderViewport}>
+      {preview}
+      <PdfPageToolbar page={readerPage} pageCount={readerPageCount} onPageChange={setReaderPage} />
+    </View>
+  );
   if (!selectable) return preview;
   return <View style={styles.pdfPositionCard}>
     <View style={styles.pdfPositionHeader}><View style={styles.pdfPositionCopy}><Text style={styles.clientDetailLabel}>Ubicación de la firma</Text><Text style={styles.clientMeta}>Toca el PDF para elegir dónde se colocará la firma.</Text></View><View style={styles.pdfPositionBadge}><MaterialCommunityIcons name="gesture-tap" size={16} color={ERUBRICA_COLORS.primary} /><Text style={styles.pdfPositionBadgeText}>TÁCTIL</Text></View></View>

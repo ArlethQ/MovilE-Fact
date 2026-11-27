@@ -8,7 +8,7 @@ import { AccessibilityInfo, Alert, AppState, Image, ImageSourcePropType, Linking
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 
 import { ApiError, clearAuthSession, isSessionConflictError, setAuthFailureHandler } from '../../services/apiClient';
-import { clearBotHistory } from '../../services/botService';
+import { endBotAccountSession } from '../../services/botService';
 import { API_BASE_URL } from '../../config/api';
 import { acceptPrivacyPolicy, changePassword, checkAuth, login, logout as logoutSession, recoverPassword, register } from '../../services/authService';
 import { ChangePasswordRequest, DynamicMenu, LoginRequest, LoginResponse, RegisterRequest, ServiceAccess, TipoDocumento } from '../../types/auth';
@@ -775,7 +775,7 @@ export function AppContent({ BusinessHome }: { BusinessHome: ComponentType<Busin
 
   const resetLocalSession = (removeBiometric = false) => {
     const activeUserId = currentUser?.idUsuario ?? 0;
-    if (activeUserId > 0) void clearBotHistory(activeUserId);
+    endBotAccountSession(activeUserId);
     clearAuthSession();
     setCurrentUser(null);
     setPassword('');

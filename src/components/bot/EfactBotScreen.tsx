@@ -5,10 +5,18 @@ import * as Speech from 'expo-speech';
 import type * as SpeechRecognition from 'expo-speech-recognition';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { ApiError } from '../../services/apiClient';
-import { clearBotHistory, inferERubricaAttachmentAction, loadBotHistory, saveBotHistory, sendBotMessage } from '../../services/botService';
+import { findBotInvoicePdfs, getBotEmittedInvoiceNumber, inferERubricaAttachmentAction, loadBotHistory, parseBotInvoicePdfRequest, resolveBotInvoiceTurn, saveBotHistory, sendBotMessage, startNewBotChat } from '../../services/botService';
+import { getOperationalReadModule, resolveOperationalRead } from '../../services/botOperationalService';
+import { operationalViews, planOperationalRead, type OperationalReadContext, type OperationalReadModule } from '../../utils/botOperationalRead';
+import { planBotInvoiceTurn, type BotInvoiceConversation } from '../../utils/botInvoiceConversation';
 import type { BotFacturaDraft, BotSelectionOption, BotSessionScope, BotWorkflowState } from '../../services/botService';
-import type { BotFeedbackState, BotMessage, BotProgressStep } from '../../types/bot';
+import type { BotFeedbackState, BotInvoicePdf, BotMessage, BotProgressStep } from '../../types/bot';
 import { NumiThinkingIndicator } from './NumiThinkingIndicator';
+import { NumiUsageModal } from './NumiUsageModal';
+import { NumiHistoryModal } from './NumiHistoryModal';
+import { NumiCatalogList } from './NumiCatalogList';
+import { formatInvoiceDateKey } from '../../utils/botInvoiceDate';
+import { formatBotAnswer } from '../../utils/botAnswerFormatting';
 import { styles } from '../../styles/appStyles';
 
 type SpeechRecognitionBindings = typeof SpeechRecognition;
@@ -85,6 +93,10 @@ export function EfactBotScreen({
   userName,
   userId,
   onNavigate,
+  onOpenInvoicePdf,
+  canReadInvoices = false,
+  authorizedReadViews,
+  catalogUserId,
   onUiAction,
   attachmentActions,
   voiceControlsRef,
@@ -105,10 +117,15 @@ export function EfactBotScreen({
   viewKey,
   workflow,
   onWorkflowChange,
+  canViewUsage = false,
 }: {
   userName: string;
   userId: number;
   onNavigate?: (route: string) => void;
+  onOpenInvoicePdf?: (invoice: BotInvoicePdf, signal?: AbortSignal) => Promise<boolean>;
+  canReadInvoices?: boolean;
+  authorizedReadViews?: ReadonlySet<string>;
+  catalogUserId?: number;
   onUiAction?: (action: string) => void;
   attachmentActions?: Array<{ label: string; onPress: () => void }>;
   voiceControlsRef?: MutableRefObject<BotVoiceControls | null>;
@@ -129,9 +146,13 @@ export function EfactBotScreen({
   viewKey?: string;
   workflow?: BotWorkflowState | null;
   onWorkflowChange?: (workflow: BotWorkflowState | null) => void;
+  canViewUsage?: boolean;
 }) {
   const erubricaTheme = theme === 'erubrica';
   const [sending, setSending] = useState(false);
+  const [usageOpen, setUsageOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const savingArchiveRef = useRef(false);
   const [thinkingRequest, setThinkingRequest] = useState('');
   const [error, setError] = useState('');
   const [listening, setListening] = useState(false);
@@ -176,6 +197,11 @@ export function EfactBotScreen({
   const speechStopPromiseRef = useRef<Promise<void>>(Promise.resolve());
   const speechMutedRef = useRef(false);
   const requestGenerationRef = useRef(0);
+  const invoiceConversationRef = useRef<BotInvoiceConversation | undefined>(undefined);
+  const readRequestsRef = useRef(new Set<AbortController>());
+  const operationalContextRef = useRef<OperationalReadContext | undefined>(undefined);
+  const invoiceClarificationRef = useRef(false);
+  const lastEmittedInvoiceRef = useRef<string | undefined>(undefined);
   const sendingRef = useRef(false);
   const queuedRequestsRef = useRef<Array<{ text: string; modo: 'texto' | 'voz'; requestId?: string; messageAdded: boolean }>>([]);
   const botRequestAbortRef = useRef<AbortController | null>(null);
@@ -185,6 +211,19 @@ export function EfactBotScreen({
   const scopedHistoryReadyRef = useRef(sessionScope !== 'erubrica');
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const compactLayout = windowWidth < 360;
+  const canReadOperational = (module: OperationalReadModule) => Boolean(authorizedReadViews?.has(operationalViews[module]) ||
+    (module === 'proveedores' && authorizedReadViews?.has('proveedores')));
+
+  useEffect(() => {
+    invoiceConversationRef.current = undefined;
+    operationalContextRef.current = undefined;
+    invoiceClarificationRef.current = false;
+    lastEmittedInvoiceRef.current = undefined;
+    return () => {
+      readRequestsRef.current.forEach((request) => request.abort());
+      readRequestsRef.current.clear();
+    };
+  }, [userId, catalogUserId, sessionScope, canReadInvoices, authorizedReadViews]);
 
   useEffect(() => {
     if (workflow === undefined) return;
@@ -309,14 +348,9 @@ export function EfactBotScreen({
     if (nextMuted) void stopBotSpeech();
   };
 
-  const startNewConversation = async () => {
-    Alert.alert('Borrar historial', 'Se borrarán las conversaciones guardadas en este dispositivo y se iniciará una nueva sesión con Númi.', [
-      { text: 'Cancelar', style: 'cancel' },
-      { text: 'Borrar', style: 'destructive', onPress: () => void resetConversation() },
-    ]);
-  };
-
-  const resetConversation = async () => {
+  const startNewConversation = async (eraseHistory = false) => {
+    if (sendingRef.current || savingArchiveRef.current) return false;
+    savingArchiveRef.current = true;
     requestGenerationRef.current += 1;
     queuedRequestsRef.current = [];
     abortBotRequest();
@@ -334,7 +368,18 @@ export function EfactBotScreen({
       voiceRecognitionStarted.current = false;
       ExpoSpeechRecognitionModule?.abort();
     }
-    await clearBotHistory(userId, sessionScope);
+    try {
+      await startNewBotChat(userId, sessionScope, messages, eraseHistory);
+    } catch {
+      setError(eraseHistory ? 'No se pudo borrar el historial.' : 'No se pudo guardar la conversación.');
+      return false;
+    } finally {
+      savingArchiveRef.current = false;
+    }
+    invoiceConversationRef.current = undefined;
+    operationalContextRef.current = undefined;
+    invoiceClarificationRef.current = false;
+    lastEmittedInvoiceRef.current = undefined;
     setMessages([]);
     setDraft('');
     setFeedbackByMessage({});
@@ -358,6 +403,7 @@ export function EfactBotScreen({
     setVoiceResponse('');
     setQuickActionsOpen(false);
     setAttachmentsOpen(false);
+    return true;
   };
 
   useEffect(() => () => {
@@ -505,6 +551,12 @@ export function EfactBotScreen({
     const transcript = voiceTranscriptRef.current.trim();
     if (transcript) {
       if (handsFreeEnabledRef.current) {
+        if (sessionScope === 'efact' &&
+            (planBotInvoiceTurn(transcript, invoiceConversationRef.current) || parseBotInvoicePdfRequest(transcript) ||
+              planOperationalRead(transcript, operationalContextRef.current))) {
+          void send(transcript, 'voz');
+          return;
+        }
         if (handsFreeAwaitingConfirmationRef.current) {
           if (isExplicitConfirmation(transcript)) {
             transitionVoice('processing', 'processing');
@@ -547,17 +599,61 @@ export function EfactBotScreen({
     }
   }, [messages.length, setMessages, userName, welcomeText]);
 
-  const send = async (preset?: string, modo: 'texto' | 'voz' = 'texto', requestIdOverride?: string, messageAlreadyAdded = false) => {
+  const appendAssistantResponse = (text: string, details?: Pick<BotMessage, 'invoicePdfs' | 'catalogList' | 'emittedInvoiceNumber' | 'awaitingInvoicePdfNumber'>) => {
+    invoiceClarificationRef.current = details?.awaitingInvoicePdfNumber === true;
+    if (details?.emittedInvoiceNumber) lastEmittedInvoiceRef.current = details.emittedInvoiceNumber;
+    setMessages((current) => [...current, {
+      id: createMessageId('assistant'),
+      role: 'assistant',
+      text,
+      createdAt: Date.now(),
+      ...details,
+    }]);
+  };
+
+  const openInvoiceChoice = canReadInvoices && onOpenInvoicePdf ? async (invoice: BotInvoicePdf) => {
+    const current = invoiceConversationRef.current;
+    const request = new AbortController();
+    readRequestsRef.current.add(request);
+    try {
+      const opened = await onOpenInvoicePdf(invoice, request.signal);
+      if (!opened && !request.signal.aborted) setError('No se pudo abrir el PDF. Toca la factura para reintentar.');
+      if (opened && !request.signal.aborted && invoiceConversationRef.current === current) {
+        invoiceConversationRef.current = current?.rows.some((row) => row.id === invoice.id)
+          ? { ...current, selected: invoice }
+          : { rows: [invoice], first: invoice, selected: invoice, cursors: [null] };
+      }
+    } finally {
+      readRequestsRef.current.delete(request);
+    }
+  } : undefined;
+
+  const send = async (preset?: string, modo: 'texto' | 'voz' = 'texto', requestIdOverride?: string, messageAlreadyAdded = false, extendListId?: string) => {
     const text = (preset ?? draft).trim();
-    if (!text) return;
+    if (!text || savingArchiveRef.current) return;
+    if (!sendingRef.current && onNavigate && sessionScope === 'efact' && isDirectERubricaCommand(text)) {
+      setDraft('');
+      setRetryRequest(null);
+      setError('');
+      cancelVoiceInput();
+      onNavigate('/e-rubrica');
+      return;
+    }
     if (sendingRef.current) {
+      if (extendListId) return;
       const messageAdded = !requestIdOverride;
-      if (messageAdded) setMessages((current) => [...current, { id: createMessageId('user'), role: 'user', text }]);
+      if (messageAdded) setMessages((current) => [...current, { id: createMessageId('user'), role: 'user', text, createdAt: Date.now() }]);
       queuedRequestsRef.current.push({ text, modo, requestId: requestIdOverride, messageAdded });
       setDraft('');
       return;
     }
     const voiceRequest = modo === 'voz';
+    const operationalTurn = sessionScope === 'efact' && userId > 0 ? planOperationalRead(text, operationalContextRef.current) : null;
+    const operationalModule = getOperationalReadModule(operationalTurn, operationalContextRef.current);
+    const invoicePdfRequest = sessionScope === 'efact' && !operationalTurn
+      ? parseBotInvoicePdfRequest(text, invoiceClarificationRef.current) : null;
+    const candidate = sessionScope === 'efact' && !operationalTurn ? planBotInvoiceTurn(text, invoiceConversationRef.current) : null;
+    const invoiceTurn = candidate === 'interpret' && invoicePdfRequest === 'reference' ? null : candidate;
     const requestGeneration = requestGenerationRef.current + 1;
     requestGenerationRef.current = requestGeneration;
     if (voiceRequest) {
@@ -568,9 +664,13 @@ export function EfactBotScreen({
     setDraft('');
     setError('');
     setRetryRequest(null);
-    setWorkflowStale(false);
+    if (!operationalTurn) operationalContextRef.current = undefined;
+    if (operationalTurn || (!invoicePdfRequest && !invoiceTurn)) {
+      setWorkflowStale(false);
+      invoiceConversationRef.current = undefined;
+    }
     if (!requestIdOverride && !messageAlreadyAdded) {
-      setMessages((current) => [...current, { id: createMessageId('user'), role: 'user', text }]);
+      setMessages((current) => [...current, { id: createMessageId('user'), role: 'user', text, createdAt: Date.now() }]);
     }
     setThinkingRequest(text);
     sendingRef.current = true;
@@ -578,14 +678,109 @@ export function EfactBotScreen({
     const requestId = requestIdOverride ?? `mobile-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
     const requestController = new AbortController();
     botRequestAbortRef.current = requestController;
+    if (invoiceTurn || invoicePdfRequest || operationalTurn) readRequestsRef.current.add(requestController);
     try {
+      if ((invoiceTurn || invoicePdfRequest) && !canReadInvoices) {
+        const answer = 'Tu usuario no tiene acceso a Mis facturas.';
+        appendAssistantResponse(answer);
+        if (voiceRequest) {
+          setVoiceResponse(answer);
+          transitionVoice('idle', 'response');
+          void speakCurrentBotText(answer);
+        }
+        return;
+      }
+      if (invoiceTurn) {
+        if (!catalogUserId || !onOpenInvoicePdf) throw new Error('No se pudo acceder al visor de facturas.');
+        const signal = requestController.signal;
+        const result = await resolveBotInvoiceTurn(invoiceTurn, catalogUserId, text, modo, invoiceConversationRef.current, signal);
+        if (signal.aborted || requestGeneration !== requestGenerationRef.current) return;
+        const opened = result.autoOpen ? await onOpenInvoicePdf(result.autoOpen, signal) : false;
+        if (signal.aborted || requestGeneration !== requestGenerationRef.current) return;
+        invoiceConversationRef.current = result.context && opened
+          ? { ...result.context, selected: result.autoOpen } : result.context;
+        const answer = result.notice ?? (result.autoOpen
+          ? opened ? 'Abrí el PDF A4 en el visor.' : 'Encontré la factura, pero no pude cargar su PDF. Toca Ver PDF para reintentar.'
+          : describeInvoicePage(result.rows.length, result.context));
+        appendAssistantResponse(answer, {
+          invoicePdfs: result.rows.length ? result.rows : undefined,
+          awaitingInvoicePdfNumber: result.rows.length ? undefined : true,
+        });
+        if (voiceRequest) {
+          setVoiceResponse(answer);
+          transitionVoice('idle', opened ? null : 'response');
+          void speakCurrentBotText(answer);
+        }
+        return;
+      }
+      if (invoicePdfRequest) {
+        if (!catalogUserId || !onOpenInvoicePdf) throw new Error('No se pudo acceder al visor de facturas.');
+        const signal = requestController.signal;
+        const dateRequest = typeof invoicePdfRequest === 'object' && 'date' in invoicePdfRequest ? invoicePdfRequest : null;
+        const previous = invoicePdfRequest === 'reference' ? invoiceConversationRef.current : undefined;
+        const lookup = invoicePdfRequest === 'reference'
+          ? !previous && lastEmittedInvoiceRef.current ? { number: lastEmittedInvoiceRef.current } : null
+          : invoicePdfRequest === 'clarify' || invoicePdfRequest === 'invalidDate' ? null : invoicePdfRequest;
+        const selected = previous?.selected ?? (previous?.rows.length === 1 ? previous.rows[0] : undefined);
+        const invoices = lookup ? await findBotInvoicePdfs(catalogUserId, lookup, signal)
+          : selected ? [selected] : previous?.rows ?? [];
+        if (requestController.signal.aborted || requestGeneration !== requestGenerationRef.current) return;
+        const autoOpen = invoices.length === 1 && !dateRequest?.listOnly;
+        const opened = autoOpen && await onOpenInvoicePdf(invoices[0], signal);
+        if (signal.aborted || requestGeneration !== requestGenerationRef.current) return;
+        if (invoices.length) {
+          invoiceConversationRef.current = previous
+            ? { ...previous, selected: opened ? invoices[0] : previous.selected }
+            : { rows: invoices, first: invoices[0], selected: opened ? invoices[0] : undefined, cursors: [null] };
+        }
+        const answer = autoOpen
+          ? opened ? 'Abrí el PDF A4 en el visor.' : 'Encontré la factura, pero no pude cargar su PDF. Toca Ver PDF para reintentar.'
+          : dateRequest ? describeInvoiceDateResults(dateRequest.date, invoices.length)
+          : invoices.length > 1 ? previous ? 'Elige cuál de las facturas de tu última consulta quieres abrir.'
+            : 'Encontré varias facturas con ese número. Elige la que quieres abrir.'
+          : invoicePdfRequest === 'invalidDate' ? 'Esa fecha no es válida. Puedes escribirla como 20/11/2026 o 20 de noviembre.'
+          : !lookup ? '¿De qué factura quieres ver el PDF? Puedes indicar la fecha, el número o pedir la última de tu cuenta.'
+          : lookup === 'latest' ? 'No encontré facturas en Mis facturas.'
+          : 'No encontré ese número en Mis facturas. Verifica el número completo e inténtalo de nuevo.';
+        appendAssistantResponse(answer, {
+          invoicePdfs: invoices.length ? invoices : undefined,
+          awaitingInvoicePdfNumber: invoices.length === 0 && lookup !== 'latest' ? true : undefined,
+        });
+        if (voiceRequest) {
+          setVoiceResponse(answer);
+          transitionVoice('idle', opened ? null : 'response');
+          void speakCurrentBotText(answer);
+        }
+        return;
+      }
+      if (operationalTurn) {
+        const result = operationalModule && !canReadOperational(operationalModule)
+          ? { answer: 'Tu usuario no tiene acceso a ese módulo.' }
+          : await resolveOperationalRead(operationalTurn, text, modo, operationalContextRef.current, requestController.signal);
+        if (requestController.signal.aborted || requestGeneration !== requestGenerationRef.current) return;
+        operationalContextRef.current = result.context;
+        if (extendListId && result.list) {
+          const page = result.list;
+          setMessages((current) => current.map((message) => message.id === extendListId && message.catalogList
+            ? { ...message, catalogList: { ...message.catalogList, rows: [...message.catalogList.rows, ...page.rows], siguiente: page.siguiente } }
+            : message));
+        } else {
+          appendAssistantResponse(result.answer, result.list ? { catalogList: result.list } : undefined);
+        }
+        if (voiceRequest) {
+          setVoiceResponse(result.answer);
+          transitionVoice('idle', 'response');
+          void speakCurrentBotText(result.answer);
+        }
+        return;
+      }
       const botResult = await sendBotMessage({
         message: text,
         userId,
         requestId,
         modo,
         sessionScope,
-        contexto: assistantContext ?? 'asistente de facturación: ayuda a crear facturas, buscar clientes y productos, completar datos faltantes, revisar subtotal, IVA y total, confirmar o cancelar la emisión. Cuando la persona pida una lista de clientes o productos, muestra únicamente los 3 primeros resultados y ofrece continuar con los siguientes. Si solicita un servicio o producto concreto, como "servicios prestados", usa una coincidencia exacta del catálogo o muestra opciones para que el usuario elija; nunca selecciones otro producto solo por ser el primero. Usa datos reales del usuario y no inventes información. Usa lenguaje neutral; no asumas el género de la persona ni uses bienvenido/bienvenida.',
+        contexto: assistantContext ?? 'asistente de facturación: ayuda a crear facturas, buscar clientes y productos, completar datos faltantes, revisar subtotal, IVA y total, confirmar o cancelar la emisión. En consultas de datos, da primero un resumen breve y presenta cada resultado en una línea numerada; separa las recomendaciones del listado. Si hay coincidencias, muéstralas y solicita solo el dato imprescindible para resolver una ambigüedad. Cuando la persona pida una lista de clientes o productos, muestra hasta 3 resultados y ofrece continuar. Si solicita un servicio o producto concreto, como "servicios prestados", usa una coincidencia exacta del catálogo o muestra opciones para que el usuario elija; nunca selecciones otro producto solo por ser el primero. Usa datos reales del usuario y no inventes información. Usa lenguaje neutral; no asumas el género de la persona ni uses bienvenido/bienvenida.',
         signal: requestController.signal,
       });
       if (requestGeneration !== requestGenerationRef.current) return;
@@ -603,8 +798,14 @@ export function EfactBotScreen({
       if (uiAction && (navigationRequested || sessionScope === 'erubrica')) onUiAction?.(uiAction);
       const catalogListRequest = isCatalogListRequest(text);
       const visibleSelectionOptions = catalogListRequest ? botResult.selectionOptions.slice(0, 3) : botResult.selectionOptions;
-      const presentationAnswer = limitCatalogListAnswer(botResult.answer, text);
-      setMessages((current) => [...current, { id: createMessageId('assistant'), role: 'assistant', text: presentationAnswer }]);
+      const presentationAnswer = limitCatalogListAnswer(formatBotAnswer(botResult.answer), text);
+      appendAssistantResponse(presentationAnswer, {
+        invoicePdfs: botResult.invoicePdfs.length ? botResult.invoicePdfs : undefined,
+        emittedInvoiceNumber: getBotEmittedInvoiceNumber(botResult.action, botResult.emitted, botResult.answer),
+      });
+      if (canReadInvoices && botResult.action === 'ver_factura_pdf' && botResult.invoicePdfs.length === 1) {
+        onOpenInvoicePdf?.(botResult.invoicePdfs[0]);
+      }
       setInvoiceDraft(botResult.draft ?? null);
       setMissingData(botResult.missing);
       setRequiresConfirmation(botResult.requiresConfirmation);
@@ -666,6 +867,17 @@ export function EfactBotScreen({
     } catch (err) {
       if (requestGeneration !== requestGenerationRef.current || requestController.signal.aborted) return;
       setRetryRequest({ text, modo, requestId });
+      if (invoicePdfRequest || invoiceTurn || operationalTurn) {
+        const message = operationalTurn ? err instanceof ApiError && err.status === 403 ? 'Tu usuario no tiene acceso a ese módulo.'
+          : err instanceof ApiError && err.status === 404 ? 'La API conectada todavía no tiene habilitadas las consultas operativas de Númi.'
+            : err instanceof ApiError && err.status === 400 ? 'Revisa los filtros de la consulta y vuelve a intentar.'
+              : 'No se pudo completar la consulta. Intenta nuevamente.'
+          : err instanceof ApiError && err.status === 403 ? 'Tu usuario no tiene acceso a Mis facturas.'
+          : 'No se pudo consultar la factura. Intenta nuevamente.';
+        setError(message);
+        if (voiceRequest) showVoiceError(message);
+        return;
+      }
       setWorkflowStale(true);
       onWorkflowChange?.({
         invoiceDraft,
@@ -687,6 +899,7 @@ export function EfactBotScreen({
       }
       setError(err instanceof ApiError || err instanceof Error ? err.message : 'No se pudo contactar al bot.');
     } finally {
+      readRequestsRef.current.delete(requestController);
       if (botRequestAbortRef.current === requestController) botRequestAbortRef.current = null;
       if (requestGeneration === requestGenerationRef.current) {
         sendingRef.current = false;
@@ -878,6 +1091,18 @@ export function EfactBotScreen({
     toggleHandsFreeMode();
   };
 
+  const handleComposerVoicePress = () => {
+    if (voiceRecognitionAvailable) {
+      toggleHandsFreeMode();
+      return;
+    }
+    Alert.alert(
+      'Reconocimiento de voz no disponible',
+      'Para usar el micrófono de Númi, abre una compilación de desarrollo de E-FACT con reconocimiento de voz. En Expo Go puedes escribir o usar el dictado de tu teclado si está disponible.',
+      [{ text: 'Escribir en el chat', onPress: () => voiceInputRef.current?.focus() }],
+    );
+  };
+
   const startHandsFreeConfirmation = () => {
     clearVoiceTimers();
     handsFreeEnabledRef.current = true;
@@ -931,11 +1156,19 @@ export function EfactBotScreen({
     };
   }, [voiceControlsRef, startHandsFree, startVoiceInput, stopVoiceInput]);
 
+  const latestMessage = messages.at(-1);
+  const latestList = latestMessage?.catalogList;
+  const loadMoreOperational = latestMessage && latestList?.siguiente != null && operationalContextRef.current
+    ? () => void send('Muéstrame los siguientes', 'texto', undefined, true, latestMessage.id) : undefined;
   const renderVoiceOverlay = () => voiceOverlayState ? (
     <VoiceInteractionOverlay
       state={voiceOverlayState}
       transcript={voiceTranscript}
       response={voiceResponse}
+      invoicePdfs={latestMessage?.invoicePdfs}
+      catalogList={latestMessage?.text === voiceResponse && latestList && canReadOperational(latestList.kind) ? latestList : undefined}
+      onMoreCatalog={loadMoreOperational}
+      onOpenInvoicePdf={openInvoiceChoice}
       draft={invoiceDraft}
       missing={missingData}
       pendingOperation={pendingOperation}
@@ -985,6 +1218,17 @@ export function EfactBotScreen({
   return (
     <View style={[styles.botScreen, !embedded && { minHeight: Math.min(560, Math.max(420, windowHeight - 300)) }, embedded && styles.botScreenEmbedded, erubricaTheme && styles.erubricaBotScreen]}>
       <View style={styles.botScreenInner}>
+      {canViewUsage && usageOpen ? <NumiUsageModal onClose={() => setUsageOpen(false)} /> : null}
+      {historyOpen ? (
+        <NumiHistoryModal
+          userId={userId}
+          scope={sessionScope}
+          messages={messages}
+          sending={sending}
+          onNewChat={startNewConversation}
+          onClose={() => setHistoryOpen(false)}
+        />
+      ) : null}
       <View style={[styles.botWidgetHeader, erubricaTheme && styles.erubricaBotWidgetHeader]}>
         <Image source={require('../../../assets/numi-chat-avatar.jpg')} style={styles.botWidgetAvatar} />
         <View style={styles.botWidgetCopy}>
@@ -996,8 +1240,13 @@ export function EfactBotScreen({
           </View>
         </View>
         <View style={styles.botWidgetHeaderActions}>
-          <Pressable accessibilityRole="button" accessibilityLabel="Borrar historial de conversaciones" onPress={() => void startNewConversation()} hitSlop={8} disabled={sending} style={[styles.botHeaderActionButton, sending && styles.botHeaderActionDisabled]}>
-            <MaterialCommunityIcons name="trash-can-outline" size={18} color="#FFFFFF" />
+          {canViewUsage ? (
+            <Pressable accessibilityRole="button" accessibilityLabel="Consumo de Númi" onPress={() => setUsageOpen(true)} hitSlop={8} style={styles.botHeaderActionButton}>
+              <MaterialCommunityIcons name="chart-box-outline" size={18} color="#FFFFFF" />
+            </Pressable>
+          ) : null}
+          <Pressable accessibilityRole="button" accessibilityLabel="Historial de conversaciones" onPress={() => setHistoryOpen(true)} hitSlop={8} style={styles.botHeaderActionButton}>
+            <MaterialCommunityIcons name="history" color="#FFFFFF" size={18} />
           </Pressable>
           <Pressable accessibilityRole="button" accessibilityLabel={speechMuted ? 'Activar lectura en voz alta' : 'Silenciar lectura en voz alta'} onPress={toggleSpeechMuted} hitSlop={8} style={styles.botHeaderActionButton}>
             <MaterialCommunityIcons name={speechMuted ? 'volume-off' : 'volume-high'} size={19} color="#FFFFFF" />
@@ -1020,11 +1269,19 @@ export function EfactBotScreen({
         {messages.map((message) => (
           <View key={message.id} style={message.role === 'user' ? styles.botUserRow : styles.botAssistantRow}>
             {message.role === 'assistant' ? <Image source={require('../../../assets/numi-chat-avatar.jpg')} style={[styles.botMessageAvatar, erubricaTheme && styles.erubricaBotMessageAvatar]} /> : null}
-            <View style={[styles.botBubble, message.role === 'user' ? styles.botUserBubble : styles.botAssistantBubble, erubricaTheme && message.role === 'user' && styles.erubricaBotUserBubble]}>
+            <View style={[styles.botBubble, message.role === 'user' ? styles.botUserBubble : styles.botAssistantBubble, erubricaTheme && message.role === 'user' && styles.erubricaBotUserBubble, (message.catalogList || (message.invoicePdfs?.length ?? 0) > 1 || message.role === 'assistant' && message.text.length > 420) && styles.botListBubble]}>
               <View style={styles.botMessageRow}>
-                <Text style={[styles.botBubbleText, message.role === 'user' && styles.botUserBubbleText]}>{message.text}</Text>
+                {message.role === 'assistant' && message.text.length > 420 ? (
+                  <ScrollView style={styles.botLongAnswer} nestedScrollEnabled keyboardShouldPersistTaps="handled">
+                    <Text style={styles.botBubbleText}>{formatBotAnswer(message.text)}</Text>
+                  </ScrollView>
+                ) : <Text style={[styles.botBubbleText, message.role === 'user' && styles.botUserBubbleText]}>{message.text}</Text>}
                 {message.role === 'assistant' ? <Pressable accessibilityRole="button" accessibilityLabel={speechMuted ? 'Lectura silenciada' : 'Escuchar respuesta'} style={styles.botAudioButton} onPress={() => { if (!speechMuted) void speakCurrentBotText(message.text); }} hitSlop={8}><MaterialCommunityIcons name={speechMuted ? 'volume-off' : 'volume-high'} size={16} color="#0878C9" /></Pressable> : null}
               </View>
+              <InvoicePdfOptions invoices={message.invoicePdfs} onOpen={openInvoiceChoice} />
+              {message.catalogList && canReadOperational(message.catalogList.kind) ? (
+                <NumiCatalogList {...message.catalogList} onMore={message === latestMessage ? loadMoreOperational : undefined} />
+              ) : null}
               {message.role === 'assistant' ? (
                 <View style={styles.botBubbleFeedback}>
                   <Pressable accessibilityLabel="Respuesta util" hitSlop={6} style={[styles.botFeedbackButton, feedbackByMessage[message.id] === 'like' && styles.botFeedbackButtonActive]} onPress={() => setFeedbackByMessage((current) => {
@@ -1098,7 +1355,7 @@ export function EfactBotScreen({
       ) : null}
       {handsFreeEnabled ? (
         <View style={styles.botHandsFreeBanner}>
-          <MaterialCommunityIcons name="headset" size={16} color="#0878C9" />
+          <MaterialCommunityIcons name="microphone" size={16} color="#0878C9" />
           <Text style={styles.botHandsFreeBannerText}>Mantén presionado el micrófono · Suelta para enviar</Text>
           <Pressable accessibilityLabel="Desactivar modo manos libres" onPress={stopHandsFreeMode} hitSlop={8}><Text style={styles.botHandsFreeBannerAction}>Detener</Text></Pressable>
         </View>
@@ -1137,8 +1394,8 @@ export function EfactBotScreen({
         {attachmentActions?.length ? <Pressable accessibilityRole="button" accessibilityLabel="Adjuntar archivo" accessibilityState={{ expanded: attachmentsOpen, disabled: sending || listening }} style={[styles.botToolButton, compactLayout && styles.botToolButtonCompact, attachmentsOpen && styles.botToolButtonActive]} disabled={sending || listening} onPress={() => { setQuickActionsOpen(false); setAttachmentsOpen((value) => !value); }}>
           <MaterialCommunityIcons name="paperclip" size={19} color={attachmentsOpen ? '#FFFFFF' : '#6E94B4'} />
         </Pressable> : null}
-        <Pressable accessibilityRole="button" accessibilityLabel={handsFreeEnabled ? 'Desactivar modo manos libres' : 'Activar modo manos libres'} style={[styles.botToolButton, compactLayout && styles.botToolButtonCompact, handsFreeEnabled && styles.botToolButtonActive]} disabled={!voiceRecognitionAvailable} onPress={toggleHandsFreeMode}>
-          <MaterialCommunityIcons name="headset" size={19} color={handsFreeEnabled ? '#FFFFFF' : '#6E94B4'} />
+        <Pressable accessibilityRole="button" accessibilityLabel={handsFreeEnabled ? 'Desactivar modo manos libres' : 'Activar modo manos libres'} style={[styles.botToolButton, compactLayout && styles.botToolButtonCompact, handsFreeEnabled && styles.botToolButtonActive]} onPress={handleComposerVoicePress}>
+          <MaterialCommunityIcons name="microphone" size={19} color={handsFreeEnabled ? '#FFFFFF' : '#6E94B4'} />
         </Pressable>
         <TextInput ref={voiceInputRef} value={draft} onChangeText={(value) => { setDraft(value); if (retryRequest && value.trim() !== retryRequest.text) setRetryRequest(null); }} placeholder={listening ? 'Escuchando...' : 'Escribe tu orden...'} placeholderTextColor="#8DA1B4" style={[styles.botInput, compactLayout && styles.botInputCompact]} editable={!listening} multiline maxLength={800} returnKeyType="send" blurOnSubmit accessibilityLabel="Escribe una instrucción para Númi" onFocus={() => { setTimeout(() => scrollMessagesToEnd(), 80); }} onSubmitEditing={() => void send()} />
         <Pressable accessibilityRole="button" accessibilityLabel="Mostrar acciones rápidas" style={[styles.botToolButton, compactLayout && styles.botToolButtonCompact, quickActionsOpen && styles.botToolButtonActive]} disabled={sending || listening} onPress={() => setQuickActionsOpen((value) => !value)}>
@@ -1154,10 +1411,50 @@ export function EfactBotScreen({
   );
 }
 
-function VoiceInteractionOverlay({ state, transcript, response, draft, missing, pendingOperation, requiresConfirmation, invoiceState, progress, configurationRoutes, reduceMotion, stale, selectionOptions, showWorkflow, handsFreeEnabled, listening, onChangeTranscript, onCancel, onReviewEdit, onReviewSend, onStartConfirmationVoice, onStartVoice, onStopVoice, onNavigate, onCommand }: {
+function InvoicePdfOptions({ invoices, onOpen }: { invoices?: BotInvoicePdf[]; onOpen?: (invoice: BotInvoicePdf) => void }) {
+  if (!invoices?.length || !onOpen) return null;
+  return <NumiCatalogList
+    kind="facturas"
+    rows={invoices.map((invoice) => ({
+      name: invoice.numeroFactura || 'Factura',
+      detail: [
+        invoice.client,
+        invoice.date ? formatInvoiceDateKey(invoice.date) : undefined,
+        invoice.total !== undefined ? formatMoney(invoice.total) : undefined,
+      ].filter(Boolean).join(' · '),
+    }))}
+    onSelect={(index) => onOpen(invoices[index])}
+  />;
+}
+
+function describeInvoiceDateResults(date: string, count: number) {
+  const day = formatInvoiceDateKey(date);
+  if (count === 0) return `No encontré facturas con fecha de emisión ${day}.`;
+  return count === 1 ? `Encontré 1 factura del ${day}.`
+    : `Encontré ${count} facturas del ${day}. Toca la que quieres abrir.`;
+}
+
+function describeInvoicePage(count: number, context?: BotInvoiceConversation) {
+  const filters = context?.filters;
+  const formatRange = filters?.desde && filters.hasta
+    ? filters.desde === filters.hasta ? ` del ${formatInvoiceDateKey(filters.desde)}`
+      : ` del ${formatInvoiceDateKey(filters.desde)} al ${formatInvoiceDateKey(filters.hasta)}`
+    : '';
+  const client = filters?.cliente ? ` de ${filters.cliente}` : '';
+  if (!count) return `No encontré facturas${client}${formatRange}.`;
+  const page = context?.cursors.length ?? 1;
+  const label = `${count} ${count === 1 ? 'factura' : 'facturas'}${client}${formatRange}`;
+  return `${page > 1 ? `Página ${page}. ` : ''}Encontré ${label}${context?.next ? ' en esta página. Puedes pedir las siguientes.' : '.'}`;
+}
+
+function VoiceInteractionOverlay({ state, transcript, response, invoicePdfs, catalogList, onMoreCatalog, onOpenInvoicePdf, draft, missing, pendingOperation, requiresConfirmation, invoiceState, progress, configurationRoutes, reduceMotion, stale, selectionOptions, showWorkflow, handsFreeEnabled, listening, onChangeTranscript, onCancel, onReviewEdit, onReviewSend, onStartConfirmationVoice, onStartVoice, onStopVoice, onNavigate, onCommand }: {
   state: VoiceOverlayState;
   transcript: string;
   response: string;
+  invoicePdfs?: BotInvoicePdf[];
+  catalogList?: BotMessage['catalogList'];
+  onMoreCatalog?: () => void;
+  onOpenInvoicePdf?: (invoice: BotInvoicePdf) => void;
   draft: BotFacturaDraft | null;
   missing: string[];
   pendingOperation: { tipo?: string; resumen?: string; expiraEn?: string | null } | null;
@@ -1216,7 +1513,7 @@ function VoiceInteractionOverlay({ state, transcript, response, draft, missing, 
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} keyboardVerticalOffset={Platform.OS === 'ios' ? 8 : 0} style={styles.botVoiceOverlayKeyboardAvoider}>
       <View style={[styles.botVoiceOverlayCard, { maxHeight: Math.min(viewportHeight * 0.58, 520), width: Math.max(0, Math.min(viewportWidth - 24, 390)) }]}>
        <View style={styles.botVoiceOverlayHandle} />
-       <ScrollView style={{ width: '100%' }} keyboardShouldPersistTaps="handled" keyboardDismissMode="interactive" showsVerticalScrollIndicator={showWorkflow}>
+       <ScrollView style={{ width: '100%' }} nestedScrollEnabled keyboardShouldPersistTaps="handled" keyboardDismissMode="interactive" showsVerticalScrollIndicator={showWorkflow}>
         <View style={styles.botVoiceOverlayHeader}>
           <Image source={require('../../../assets/numi-chat-avatar.jpg')} style={styles.botVoiceOverlayAvatar} />
           <View style={styles.botVoiceOverlayHeaderCopy}>
@@ -1258,6 +1555,8 @@ function VoiceInteractionOverlay({ state, transcript, response, draft, missing, 
           </View>
         ) : null}
         {state === 'response' ? <Text style={styles.botVoiceOverlayResponse}>{response}</Text> : null}
+        {state === 'response' ? <InvoicePdfOptions invoices={invoicePdfs} onOpen={onOpenInvoicePdf} /> : null}
+        {state === 'response' && catalogList ? <NumiCatalogList {...catalogList} onMore={onMoreCatalog} /> : null}
         {pendingOperation && state === 'response' && !showWorkflow ? <View style={styles.botVoiceOverlayOperation}><Text style={styles.botVoiceOverlayOperationLabel}>Operación pendiente</Text><Text style={styles.botVoiceOverlayOperationText}>{pendingOperation.resumen || 'Operación que requiere confirmación'}</Text></View> : null}
         {showWorkflow && state === 'response' ? <BotInvoiceWorkflowCard draft={draft} missing={missing} requiresConfirmation={requiresConfirmation} state={invoiceState} progress={progress} configurationRoutes={configurationRoutes} reduceMotion={reduceMotion} stale={stale} selectionOptions={selectionOptions} pendingOperation={pendingOperation} sending={false} onNavigate={onNavigate} onCommand={onCommand} /> : null}
         {state === 'review' ? (
@@ -1420,7 +1719,7 @@ function BotInvoiceWorkflowCard({ draft, missing, requiresConfirmation, state, p
       {selectionOptions.length > 0 ? (
         <View style={styles.botWorkflowOptions}>
           <Text style={styles.botWorkflowSectionTitle}>Selecciona una opción</Text>
-          {selectionOptions.map((option) => <Pressable key={`${option.tipo}-${option.indice}`} disabled={sending} style={[styles.botWorkflowOption, sending && styles.botWorkflowActionDisabled]} onPress={() => onCommand(String(option.indice))}><Text style={styles.botWorkflowOptionTitle}>{option.indice}. {option.etiqueta}</Text><Text style={styles.botWorkflowOptionDescription}>{option.descripcion || 'Toca para seleccionar'}</Text></Pressable>)}
+          {selectionOptions.map((option) => <Pressable key={`${option.tipo}-${option.indice}`} accessibilityRole="button" disabled={sending} style={[styles.botWorkflowOption, sending && styles.botWorkflowActionDisabled]} onPress={() => onCommand(String(option.indice))}><Text style={styles.botWorkflowOptionTitle}>{option.indice}. {option.etiqueta}</Text><Text style={styles.botWorkflowOptionDescription}>{option.descripcion || 'Toca para seleccionar'}</Text></Pressable>)}
         </View>
       ) : null}
       {configurationRoutes.length > 0 ? (
@@ -1513,6 +1812,11 @@ function isCatalogListRequest(value: string) {
 function isExplicitNavigationRequest(value: string) {
   const normalized = normalizeVoiceCommand(value);
   return /\b(llevame|llevarme|abre|abrir|ir a|ve a|navega|navegar|muestrame la pantalla)\b/.test(normalized);
+}
+
+function isDirectERubricaCommand(value: string) {
+  const normalized = normalizeVoiceCommand(value).replace(/[¿¡!?.,]/g, '').replace(/\s+/g, ' ');
+  return /^(?:numi )?(?:(?:abre|abrir|abreme|muestrame|ir a|ve a|llevame a|dirigeme a|navega a|quiero ir a) (?:la seccion de )?)e[ -]?rubrica(?: por favor)?$/.test(normalized);
 }
 
 function isDocumentWorkflowRequest(value: string) {

@@ -32,7 +32,7 @@ import {
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { ApiError, clearAuthSession, getAuthSessionCookie, setAuthFailureHandler } from '../../services/apiClient';
-import { clearBotHistory, loadBotHistory, saveBotHistory, sendBotMessage } from '../../services/botService';
+import { loadBotHistory, saveBotHistory } from '../../services/botService';
 import type { BotWorkflowState } from '../../services/botService';
 import { API_BASE_URL } from '../../config/api';
 import { AdminMobileItem, getAdminMobileModule } from '../../services/adminMobileService';
@@ -69,7 +69,7 @@ import { ClienteForm as ExtractedClienteForm } from '../../components/clientes/C
 import { AccountStatementScreen as ExtractedAccountStatementScreen, AccountsReceivableScreen as ExtractedAccountsReceivableScreen, getAccountStatementClientId, getAccountStatementNumber, OperationalForm as ExtractedOperationalForm, PurchaseDocumentsScreen as ExtractedPurchaseDocumentsScreen } from '../../components/cuentas/OperationalFinancialScreens';
 import { RechargeHistoryScreen as ExtractedRechargeHistoryScreen } from '../../components/recargas/RechargeHistoryScreen';
 import { ExternalLink, Field, InlineSwitch, LoginActionTiles, MessageBox, PrimaryButton, SearchField, SecondaryButton, SecurityNotice, SegmentButton, TextLink } from '../../components/ui/FormControls';
-import type { BotFeedbackState, BotMessage } from '../../types/bot';
+import type { BotFeedbackState, BotInvoicePdf, BotMessage } from '../../types/bot';
 import { GlobalSearchModal as ExtractedGlobalSearchModal } from '../../components/search/GlobalSearchModal';
 import type { GlobalSearchResult as ExtractedGlobalSearchResult } from '../../types/globalSearch';
 import { InvoiceProgressSteps as SharedInvoiceProgressSteps, InvoiceSummaryRow } from '../../components/facturacion/InvoiceShared';
@@ -5098,9 +5098,10 @@ export function BusinessHome({ currentUser, incomingPdfUri, onIncomingPdfHandled
     return { status: response.status, uri: target };
   };
 
-  const openPdfPreview = async (loader: () => Promise<{ url?: string | null } | string>, fileName: string) => {
+  const openPdfPreview = async (loader: () => Promise<{ url?: string | null } | string>, fileName: string, signal?: AbortSignal) => {
     try {
       const response = await loader();
+      if (signal?.aborted) return false;
       const url = getDocumentAssetUrl(response);
       if (!url) throw new Error('empty-url');
       const baseDirectory = FileSystem.cacheDirectory ?? FileSystem.documentDirectory;
@@ -5114,9 +5115,14 @@ export function BusinessHome({ currentUser, incomingPdfUri, onIncomingPdfHandled
       if (download.status !== 200 || !fileInfo.exists || (fileInfo.size ?? 0) < 16 || !signature.startsWith('JVBERi0')) {
         throw new Error('invalid-pdf-download');
       }
+      if (signal?.aborted) return false;
       setPdfPreview({ uri: download.uri, name: fileName });
+      return true;
     } catch (error) {
-      setDirectoryMessage({ type: 'error', text: error instanceof ApiError ? error.message : 'No se pudo cargar la previsualización del PDF.' });
+      if (!signal?.aborted) {
+        setDirectoryMessage({ type: 'error', text: error instanceof ApiError ? error.message : 'No se pudo cargar la previsualización del PDF.' });
+      }
+      return false;
     }
   };
   const downloadPdf = async (loader: () => Promise<{ url?: string | null } | string>, fileName: string) => {
@@ -5353,6 +5359,12 @@ export function BusinessHome({ currentUser, incomingPdfUri, onIncomingPdfHandled
       ERUBRICA_COLORS,
       ERubricaMobileScreen,
       EfactBotScreen,
+      canViewBotUsage: isSuperAdmin(currentUser),
+      onOpenBotInvoicePdf: catalogUserId > 0 ? async ({ id, numeroFactura }: BotInvoicePdf, signal?: AbortSignal) => {
+        const opened = await openPdfPreview(() => getFacturaPdf(catalogUserId, id, 'A4'), `${numeroFactura || 'factura'}.pdf`, signal);
+        if (!opened && !signal) Alert.alert('No se pudo abrir el PDF', 'Vuelve a intentar desde el botón Ver PDF.');
+        return opened;
+      } : undefined,
       EmptyState,
       ExtractedDashboardHomeScreen,
       ExtractedGlobalSearchModal,

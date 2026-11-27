@@ -805,6 +805,7 @@ export function BusinessHomeLayout({ context }: { context: BusinessHomeLayoutCon
         </ScrollView> : null}
         {canUseEfact && !isERubricaWorkspace ? (
           <EfactBotScreen
+            canViewUsage={context.canViewBotUsage}
             voiceOnly={activeView !== 'bot'}
             embedded={activeView === 'bot'}
             viewKey={activeView}
@@ -813,6 +814,10 @@ export function BusinessHomeLayout({ context }: { context: BusinessHomeLayoutCon
             reduceMotion={reduceMotion}
             voiceControlsRef={botVoiceControlsRef}
             onNavigate={handleBotNavigate}
+            onOpenInvoicePdf={context.onOpenBotInvoicePdf}
+            canReadInvoices={authorizedViews?.has('mis-facturas') ?? false}
+            authorizedReadViews={authorizedViews}
+            catalogUserId={catalogUserId}
             messages={botMessages}
             setMessages={setBotMessages}
             draft={botDraft}
@@ -1011,14 +1016,14 @@ export function BusinessHomeLayout({ context }: { context: BusinessHomeLayoutCon
               </View>
               <Pressable style={styles.menuCloseButton} onPress={() => setPdfPreview(null)}><Text style={styles.menuCloseText}>×</Text></Pressable>
             </View>
-            {pdfPreview ? <PdfDocumentPreview uri={pdfPreview.uri} /> : null}
+            {pdfPreview ? <PdfDocumentPreview key={pdfPreview.uri} uri={pdfPreview.uri} reader /> : null}
             <View style={styles.pdfPreviewActions}>
               <SecondaryButton label="Cerrar" onPress={() => setPdfPreview(null)} />
               <SecondaryButton label="Compartir PDF" onPress={async () => {
                 if (!pdfPreview || !(await Sharing.isAvailableAsync())) return;
                 await Sharing.shareAsync(pdfPreview.uri, { mimeType: 'application/pdf', dialogTitle: 'Compartir PDF' });
               }} />
-              <PrimaryButton label="Abrir con otra app" loading={false} onPress={openPdfWithExternalViewer} />
+              <SecondaryButton label="Abrir con otra app" onPress={openPdfWithExternalViewer} />
             </View>
           </View>
         </View>

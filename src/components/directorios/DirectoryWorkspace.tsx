@@ -752,9 +752,11 @@ export function DirectoryWorkspace({ context }: { context: DirectoryWorkspaceCon
                  message={directoryMessage}
                  onRefresh={() => setReloadKey((value: number) => value + 1)}
                  onDetail={(factura) => catalogUserId ? getFacturaDetalle(catalogUserId, factura.codfactura) : Promise.reject(new Error('missing-user'))}
-                 onPdf={(factura, descargar = false) => catalogUserId && (descargar
-                   ? openOrDownloadPdf(() => getFacturaPdf(catalogUserId, factura.codfactura, 'A4'), `${factura.numeroCompleto ?? 'factura'}.pdf`, true)
-                   : openPdfInDeviceViewer(() => getFacturaPdf(catalogUserId, factura.codfactura, 'A4'), `${factura.numeroCompleto ?? 'factura'}.pdf`))}
+                 onPdf={(factura, descargar = false) => catalogUserId && openOrDownloadPdf(
+                   () => getFacturaPdf(catalogUserId, factura.codfactura, 'A4'),
+                   `${factura.numeroCompleto ?? 'factura'}.pdf`,
+                   descargar,
+                 )}
                  onSharePdf={(factura) => catalogUserId && sharePdf(() => getFacturaPdf(catalogUserId, factura.codfactura, 'A4'), `${factura.numeroCompleto ?? 'factura'}.pdf`)}
                  onXml={(factura) => catalogUserId && openFacturaAsset(() => getFacturaXml(catalogUserId, factura.codfactura))}
                 onEmail={sendFacturaCorreo}

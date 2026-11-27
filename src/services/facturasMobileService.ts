@@ -1,4 +1,4 @@
-import { apiRequest } from './apiClient';
+import { ApiError, apiRequest } from './apiClient';
 import { Cliente } from '../types/business';
 import { normalizeCliente } from './clientesService';
 import type { DocumentPdfFormat } from '../utils/documentFormatting';
@@ -142,9 +142,46 @@ export function normalizeFacturaPreparacion(response: FacturaPreparacion & Recor
   };
 }
 
-export async function getFacturas(userId: number, top = 0) {
-  const response = await apiRequest<ApiRow[] | Record<string, unknown>>(`/api/facturas?idUsuario=${userId}&top=${top}`);
+export async function getFacturas(userId: number, top = 0, signal?: AbortSignal, date?: string) {
+  const range = date ? `&fechaDesde=${encodeURIComponent(date)}&fechaHasta=${encodeURIComponent(date)}` : '';
+  const response = await apiRequest<ApiRow[] | Record<string, unknown>>(`/api/facturas?idUsuario=${userId}&top=${top}${range}`, { signal });
   return normalizeFacturaRows(response).map(toFacturaListItem);
+}
+
+export async function getFacturasParaNumi(filters: { desde?: string; hasta?: string; cliente?: string; numero?: string },
+  cursor: number | null, limite: number, signal: AbortSignal) {
+  const params = new URLSearchParams({ limite: String(limite) });
+  if (filters.desde) params.set('fechaDesde', filters.desde);
+  if (filters.hasta) params.set('fechaHasta', filters.hasta);
+  if (filters.cliente) params.set('cliente', filters.cliente);
+  if (filters.numero) params.set('numero', filters.numero);
+  if (cursor !== null) params.set('antesDe', String(cursor));
+  try {
+    const page = await apiRequest<{ items: ApiRow[]; antesDe?: number | null }>(
+      `/api/facturas/consulta-numi?${params.toString()}`, { signal, suppressErrorLog: true });
+    if (!page || !Array.isArray(page.items)) throw new Error('Respuesta inválida de la consulta de facturas.');
+    return { items: page.items.map(toFacturaListItem), next: page.antesDe ?? undefined };
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 404) return null;
+    throw error;
+  }
+}
+
+export async function getFacturaPorNumeroCompleto(userId: number, numeroCompleto: string, signal?: AbortSignal) {
+  const [establecimiento, puntoEmision, secuencial] = numeroCompleto.split('-');
+  const serie = establecimiento + puntoEmision;
+  // The invoice API accepts the stored number, which can include the series.
+  for (const numero of [secuencial, numeroCompleto]) {
+    try {
+      const params = new URLSearchParams({ idUsuario: String(userId), numFactura: numero, serie });
+      const response = await apiRequest<ApiRow>(`/api/facturas/por-numero?${params.toString()}`, { signal, suppressErrorLog: true });
+      const factura = pickValue(response, ['factura', 'Factura']);
+      return toFacturaListItem(isRecord(factura) ? factura : response);
+    } catch (error) {
+      if (!(error instanceof ApiError) || error.status !== 404) throw error;
+    }
+  }
+  return null;
 }
 
 export async function getFacturaDetalle(userId: number, codfactura: number): Promise<FacturaDetalle> {

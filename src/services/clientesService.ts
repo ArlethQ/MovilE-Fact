@@ -70,8 +70,8 @@ export function normalizeCliente(cliente: ClienteApi): Cliente {
   };
 }
 
-export async function getClientes(userId: number, incluirInactivos = false) {
-  const clientes = await apiRequest<ClienteApi[]>(`/api/clientes?userId=${userId}&incluirInactivos=${incluirInactivos}`);
+export async function getClientes(userId: number, incluirInactivos = false, signal?: AbortSignal) {
+  const clientes = await apiRequest<ClienteApi[]>(`/api/clientes?userId=${userId}&incluirInactivos=${incluirInactivos}`, { signal });
   return clientes.map(normalizeCliente);
 }
 

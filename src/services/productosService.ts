@@ -372,8 +372,8 @@ function normalizeLookups(lookups: ProductoLookupsApi): ProductoLookups {
   };
 }
 
-export async function getProductos(userId: number, incluirInactivos = false) {
-  const response = await apiRequest<ApiList<ProductoApi>>(`${PRODUCTOS_PATH}?userId=${userId}&incluirInactivos=${incluirInactivos}`);
+export async function getProductos(userId: number, incluirInactivos = false, signal?: AbortSignal) {
+  const response = await apiRequest<ApiList<ProductoApi>>(`${PRODUCTOS_PATH}?userId=${userId}&incluirInactivos=${incluirInactivos}`, { signal });
   return unwrapList(response).map(normalizeProducto);
 }
 
